@@ -71,6 +71,37 @@ fn verify_password(stored: &str, p: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 创建管理员(**仅当系统尚无任何用户**,原子条件插入,幂等)。
+/// 供命令行 `admin-create` 与首启环境变量引导复用;校验与哈希与网页 setup 完全一致。
+///
+/// 返回 `Ok(true)`=已创建,`Ok(false)`=已存在(未改动)。
+///
+/// # Errors
+/// 用户名/密码不合规或数据库写入失败。
+pub async fn create_admin(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    password: &str,
+) -> Result<bool, String> {
+    if !valid_username(username) {
+        return Err("用户名需 3~32 位,仅限字母数字与 _.-".to_string());
+    }
+    check_password_strength(password).map_err(|e| e.to_string())?;
+    let hash = hash_password(password).map_err(|_| "argon2 哈希失败".to_string())?;
+    let now = unix_now();
+    let res = sqlx::query!(
+        "INSERT INTO users(username, pass_hash, created_at)
+         SELECT ?1, ?2, ?3 WHERE NOT EXISTS(SELECT 1 FROM users)",
+        username,
+        hash,
+        now
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("数据库写入失败: {e}"))?;
+    Ok(res.rows_affected() == 1)
+}
+
 /// 是否已完成初始化(存在用户)。
 pub async fn setup_done(st: &AppState) -> Result<bool, AppError> {
     let n = sqlx::query_scalar!(r#"SELECT COUNT(*) as "c!: i64" FROM users"#)

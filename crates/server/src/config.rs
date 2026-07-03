@@ -144,10 +144,15 @@ impl Config {
     /// # Errors
     /// 文件/环境变量解析失败或安全校验不通过时返回错误。
     pub fn load(path: &str) -> Result<Self, ConfigError> {
-        // OUTPOST_CONFIG 是"配置文件路径"专用变量,不属于配置字段,需排除
+        // 这些 OUTPOST_ 变量是运行控制/引导用途,不是配置字段,需从配置解析中排除:
+        // CONFIG=配置文件路径;ADMIN_USER/ADMIN_PASSWORD=首启管理员引导。
         let cfg: Config = Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file(path))
-            .merge(Env::prefixed("OUTPOST_").ignore(&["CONFIG"]).split("__"))
+            .merge(
+                Env::prefixed("OUTPOST_")
+                    .ignore(&["CONFIG", "ADMIN_USER", "ADMIN_PASSWORD"])
+                    .split("__"),
+            )
             .extract()
             .map_err(|e| ConfigError::Load(e.to_string()))?;
         cfg.validate()?;

@@ -1,0 +1,11 @@
+target
+dist
+.dev
+crates/server/.dev
+.git
+.github
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+audits

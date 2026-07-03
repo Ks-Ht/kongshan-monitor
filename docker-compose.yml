@@ -1,0 +1,24 @@
+# Outpost 哨站 服务端 — 一条命令部署:  docker compose up -d --build
+# 首次启动会自动:生成自签证书、写配置、创建管理员、拉取 agent 二进制。
+services:
+  outpost:
+    build: .
+    image: outpost-server:latest
+    container_name: outpost
+    restart: unless-stopped
+    ports:
+      - "25510:25510"
+    environment:
+      # ↓↓↓ 改成你的公网 IP 或域名(用于证书 SAN 与访问地址)
+      OP_HOST: "127.0.0.1"
+      OP_PORT: "25510"
+      # 首启创建管理员(创建后此值不再使用,可留空或删除)
+      OUTPOST_ADMIN_USER: "admin"
+      OUTPOST_ADMIN_PASSWORD: "ChangeMe_请改成强密码123"
+    volumes:
+      - outpost-etc:/etc/outpost     # 证书 + 配置(务必持久化,CA 指纹需稳定)
+      - outpost-data:/var/lib/outpost # 数据库 + agent 分发目录
+
+volumes:
+  outpost-etc:
+  outpost-data:

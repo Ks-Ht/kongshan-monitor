@@ -47,34 +47,41 @@ cargo audit && cargo deny check
 sh scripts/build-release.sh   # 产出 dist/(x86_64 + aarch64 musl 全静态 + SHA256SUMS)
 ```
 
-## 部署(nginx + TLS,推荐)
+## 部署服务端(三选一)
 
-在服务器以 root:
+> 三种方式都用**内置 TLS + 自签证书**(免 nginx)。浏览器会提示证书不受信任 —— 属预期(自签),
+> 点继续访问即可,或导入生成的 `ca.pem`。agent 通过 CA 指纹钉扎信任,不受影响。
+
+### 方式一:一键脚本(最简单,推荐)
+
+在服务器以 root 执行,按提示填端口 / 访问地址 / 管理员账号密码即可:
 
 ```bash
-# 1. 用户与目录
-useradd --system --no-create-home --shell /usr/sbin/nologin outpost
-mkdir -p /etc/outpost /var/lib/outpost/dist
-install -m0755 dist/outpost-server-x86_64-unknown-linux-musl /usr/local/bin/outpost-server
-cp dist/outpost-agent-*-musl /var/lib/outpost/dist/
-chown -R outpost:outpost /var/lib/outpost
-
-# 2. 证书(私有 CA + IP SAN);记下打印的 CA 指纹
-sh deploy/gen-pki.sh <你的公网IP>
-
-# 3. 配置:复制 config.example.toml → /etc/outpost/config.toml,改 public_url
-#    权限 0640 root:outpost
-
-# 4. systemd + nginx
-install -m0644 deploy/server.service /etc/systemd/system/outpost-server.service
-install -m0644 deploy/nginx-outpost.conf /etc/nginx/sites-available/outpost
-ln -sf /etc/nginx/sites-available/outpost /etc/nginx/sites-enabled/outpost
-nginx -t && systemctl reload nginx
-systemctl daemon-reload && systemctl enable --now outpost-server
+curl -fsSL https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/server-install.sh | sh
 ```
 
-浏览器打开 `https://<IP>:25510/setup` 创建管理员(无内置默认账号)。
-私有 CA 场景浏览器会提示证书不受信任 —— 属预期(自签),可导入 `deploy 生成的 ca.pem` 消除提示。
+自动完成:下载并校验二进制 → 生成自签证书 → 写配置 → 建用户/目录/systemd → 创建管理员 → 启动。
+完成后打印面板地址与 CA 指纹。想先审阅脚本再执行:`curl -fsSL .../server-install.sh -o s.sh && less s.sh`。
+
+### 方式二:Docker
+
+```bash
+# 拉取 compose 文件(或 git clone 本仓库)
+curl -fsSLO https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/docker-compose.yml
+# 编辑 OP_HOST 为你的公网 IP/域名、OUTPOST_ADMIN_PASSWORD 为强密码,然后:
+docker compose up -d --build
+```
+
+首启自动生成证书、创建管理员(由 `OUTPOST_ADMIN_USER/PASSWORD` 引导)、拉取 agent 二进制。
+数据与证书持久化在命名卷(`outpost-etc` / `outpost-data`)。
+
+### 方式三:手动 / 置于已有 nginx 之后(进阶)
+
+参见 `deploy/`(`gen-pki.sh`、`server.service`、`nginx-outpost.conf`)与 `config.example.toml`;
+将服务端监听 `127.0.0.1` 并由 nginx 终止 TLS,或启用 `[server.tls]` 直接对外。
+命令行创建管理员:`OUTPOST_ADMIN_PASSWORD=... outpost-server admin-create --username <名>`。
+
+部署完成后浏览器打开面板地址登录(方式三未用脚本创建管理员时,首访 `/setup` 创建)。
 
 ## 添加节点(一键安装)
 

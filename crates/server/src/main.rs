@@ -108,7 +108,17 @@ async fn build_state(cfg: Config) -> Result<AppState, String> {
     let users =
         sqlx::query_scalar!(r#"SELECT COUNT(*) as "c!: i64" FROM users"#).fetch_one(&pool).await;
     if matches!(users, Ok(0)) {
-        tracing::warn!("尚未初始化:请访问 {}/setup 创建管理员账户", cfg.server.public_url);
+        // Docker/环境变量引导:提供 OUTPOST_ADMIN_USER/PASSWORD 时首启自动创建管理员
+        match (std::env::var("OUTPOST_ADMIN_USER"), std::env::var("OUTPOST_ADMIN_PASSWORD")) {
+            (Ok(u), Ok(p)) if !u.is_empty() && !p.is_empty() => {
+                match handlers::auth::create_admin(&pool, &u, &p).await {
+                    Ok(true) => tracing::info!(user = %u, "已从环境变量创建管理员"),
+                    Ok(false) => {}
+                    Err(e) => tracing::error!(error = %e, "环境变量创建管理员失败"),
+                }
+            }
+            _ => tracing::warn!("尚未初始化:请访问 {}/setup 创建管理员账户", cfg.server.public_url),
+        }
     }
 
     Ok(Arc::new(Inner {
@@ -223,6 +233,55 @@ async fn shutdown_signal() {
     tracing::info!("收到停止信号,优雅退出");
 }
 
+/// `admin-create` 子命令:创建管理员(用户名取 --username 或 OUTPOST_ADMIN_USER;
+/// 密码取 OUTPOST_ADMIN_PASSWORD 或 stdin 一行)。仅当系统尚无用户时生效(幂等)。
+async fn run_admin_create(cfg: &Config, args: &[String]) -> ExitCode {
+    let username = args
+        .iter()
+        .position(|a| a == "--username")
+        .and_then(|i| args.get(i + 1).cloned())
+        .or_else(|| std::env::var("OUTPOST_ADMIN_USER").ok())
+        .unwrap_or_default();
+    if username.is_empty() {
+        eprintln!("需要 --username <名> 或环境变量 OUTPOST_ADMIN_USER");
+        return ExitCode::FAILURE;
+    }
+    let password = std::env::var("OUTPOST_ADMIN_PASSWORD").ok().or_else(|| {
+        let mut line = String::new();
+        // 从 stdin 读一行(密码不回显由调用方/终端负责)
+        match std::io::stdin().read_line(&mut line) {
+            Ok(n) if n > 0 => Some(line.trim_end_matches(['\n', '\r']).to_string()),
+            _ => None,
+        }
+    });
+    let Some(password) = password.filter(|p| !p.is_empty()) else {
+        eprintln!("需要环境变量 OUTPOST_ADMIN_PASSWORD 或从 stdin 提供密码");
+        return ExitCode::FAILURE;
+    };
+
+    let pool = match db::open(&cfg.storage.db_path).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("数据库打开失败: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match handlers::auth::create_admin(&pool, &username, &password).await {
+        Ok(true) => {
+            println!("管理员 {username} 已创建");
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            println!("已存在管理员,跳过创建(幂等)");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("创建管理员失败: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     init_tracing();
 
@@ -230,6 +289,23 @@ fn main() -> ExitCode {
     if rustls::crypto::ring::default_provider().install_default().is_err() {
         tracing::error!("rustls provider 安装失败");
         return ExitCode::FAILURE;
+    }
+
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("--version" | "-V") => {
+            println!("outpost-server {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Some("--help" | "-h") => {
+            println!(
+                "outpost-server [admin-create --username <名>]\n  \
+                 无子命令: 按 OUTPOST_CONFIG(默认 /etc/outpost/config.toml)启动服务\n  \
+                 admin-create: 创建管理员(密码取 OUTPOST_ADMIN_PASSWORD 或 stdin;仅当无用户时)"
+            );
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
     }
 
     let cfg_path = std::env::var("OUTPOST_CONFIG")
@@ -249,6 +325,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // 子命令:创建管理员后退出
+    if args.get(1).map(String::as_str) == Some("admin-create") {
+        return rt.block_on(run_admin_create(&cfg, &args));
+    }
 
     rt.block_on(async move {
         let addr = cfg.listen_addr();
