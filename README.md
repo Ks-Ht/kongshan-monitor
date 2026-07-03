@@ -47,39 +47,46 @@ cargo audit && cargo deny check
 sh scripts/build-release.sh   # 产出 dist/(x86_64 + aarch64 musl 全静态 + SHA256SUMS)
 ```
 
-## 部署服务端(三选一)
+## 部署服务端
 
-> 三种方式都用**内置 TLS + 自签证书**(免 nginx)。浏览器会提示证书不受信任 —— 属预期(自签),
-> 点继续访问即可,或导入生成的 `ca.pem`。agent 通过 CA 指纹钉扎信任,不受影响。
+> 设计取向:服务端默认起在**高位端口(18080)**、自签 TLS,直接用 `https://<IP>:18080` 访问,
+> **不占用 80/443**,方便与服务器上已有服务共存。想要域名 + 浏览器信任的证书,再在前面
+> 加一层 nginx 反代即可(见下「加域名」)。
 
-### 方式一:一键脚本(最简单,推荐)
+### 方式一:一键脚本(推荐)
 
-在服务器以 root 执行,按提示填端口 / 访问地址 / 管理员账号密码即可:
+在服务器以 root 执行,按提示填端口(默认 18080)/ 访问地址 / 管理员账号密码:
 
 ```bash
 curl -fsSL https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/server-install.sh | sh
 ```
 
 自动完成:下载并校验二进制 → 生成自签证书 → 写配置 → 建用户/目录/systemd → 创建管理员 → 启动。
-完成后打印面板地址与 CA 指纹。想先审阅脚本再执行:`curl -fsSL .../server-install.sh -o s.sh && less s.sh`。
+完成后即可访问 `https://<IP>:18080`(自签证书,浏览器首次提示不受信任,点继续即可 —— 流量已加密)。
+想先审阅脚本再执行:`curl -fsSL .../server-install.sh -o s.sh && less s.sh`。
 
 ### 方式二:Docker
 
 ```bash
-# 拉取 compose 文件(或 git clone 本仓库)
 curl -fsSLO https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/docker-compose.yml
-# 编辑 OP_HOST 为你的公网 IP/域名、OUTPOST_ADMIN_PASSWORD 为强密码,然后:
+# 编辑 OP_HOST 为你的 IP/主机名、OUTPOST_ADMIN_PASSWORD 为强密码,然后:
 docker compose up -d --build
 ```
 
 首启自动生成证书、创建管理员(由 `OUTPOST_ADMIN_USER/PASSWORD` 引导)、拉取 agent 二进制。
-数据与证书持久化在命名卷(`outpost-etc` / `outpost-data`)。
+数据与证书持久化在命名卷。
 
-### 方式三:手动 / 置于已有 nginx 之后(进阶)
+### 加域名(可选):在前面套一层 nginx 反代
 
-参见 `deploy/`(`gen-pki.sh`、`server.service`、`nginx-outpost.conf`)与 `config.example.toml`;
-将服务端监听 `127.0.0.1` 并由 nginx 终止 TLS,或启用 `[server.tls]` 直接对外。
-命令行创建管理员:`OUTPOST_ADMIN_PASSWORD=... outpost-server admin-create --username <名>`。
+大多数服务器 80/443 已被别的服务占用,所以域名 + 受信任证书交给你自己的 nginx。装好 outpost 后:
+
+1. 给域名申请证书:`certbot certonly --webroot -w /var/www/acme -d 你的域名`
+2. 用 `deploy/nginx-reverse-proxy.conf` 模板配置 nginx(核心是 `proxy_pass https://127.0.0.1:18080; proxy_ssl_verify off;` + WebSocket 头)。
+3. 改 `/etc/outpost/config.toml`:`public_url = "https://你的域名"`、`behind_proxy = true`、`trusted_proxies = ["127.0.0.1","::1"]`,然后 `systemctl restart outpost-server`。
+
+之后浏览器用 `https://你的域名`(真证书、无警告);agent 一键命令也会自动用域名。
+
+> 命令行创建管理员(脚本/自动化用):`OUTPOST_ADMIN_PASSWORD=... outpost-server admin-create --username <名>`。
 
 部署完成后浏览器打开面板地址登录(方式三未用脚本创建管理员时,首访 `/setup` 创建)。
 

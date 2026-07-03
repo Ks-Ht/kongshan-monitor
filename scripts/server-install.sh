@@ -1,14 +1,16 @@
 #!/bin/sh
 # ============================================================================
-# Outpost 哨站 — 服务端一键交互式安装脚本(内置 TLS,免 nginx)
+# Outpost 哨站 — 服务端一键安装脚本(高位端口 + 自签 TLS,不占用 80/443)
 #
 #   curl -fsSL https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/server-install.sh | sh
 #
-# 两种模式:
-#   1) 域名 + Let's Encrypt 真证书(浏览器无警告;需域名已解析到本机、80/443 可入)
-#   2) IP + 自签证书(最快;浏览器会提示不受信任)
-# 交互询问部署信息;也可用环境变量免交互(适合自动化):
-#   OP_MODE(domain|ip) OP_HOST OP_EMAIL OP_PORT OP_ADMIN_USER OP_ADMIN_PASS OP_VERSION
+# 默认在 18080 端口起服务,直接用 https://<IP>:18080 访问(自签证书,浏览器首次会提示
+# 不受信任,点继续即可 —— 流量仍是加密的)。不碰 80/443,方便与已有服务共存。
+#
+# 想用域名 + 浏览器信任的证书:装好后在前面加个 nginx 反代即可(见 README「加域名」),
+#   proxy_pass https://127.0.0.1:18080;   # proxy_ssl_verify off;
+#
+# 免交互(自动化)可用环境变量:OP_PORT OP_HOST OP_ADMIN_USER OP_ADMIN_PASS OP_VERSION
 # ============================================================================
 set -eu
 
@@ -51,24 +53,9 @@ ask_secret() {
 }
 
 info "Outpost 哨站 服务端安装(架构 $ARCH,版本 $VERSION)"
-if [ -z "${OP_MODE:-}" ]; then
-  printf '选择证书模式:\n  1) 域名 + Let'\''s Encrypt 真证书(推荐,浏览器无警告)\n  2) IP + 自签证书(最快)\n' > "$TTY"
-  ask OP_MODE "输入 1 或 2" "1"
-  case "$OP_MODE" in 1|domain) OP_MODE=domain ;; 2|ip) OP_MODE=ip ;; *) OP_MODE=domain ;; esac
-fi
-[ "$OP_MODE" = "domain" ] || [ "$OP_MODE" = "ip" ] || err "OP_MODE 只能是 domain 或 ip"
-
-if [ "$OP_MODE" = "domain" ]; then
-  ask OP_HOST "你的域名(需已解析到本机)" ""
-  case "${OP_HOST:-}" in ''|*[!a-zA-Z0-9.-]*) err "域名非法" ;; esac
-  ask OP_EMAIL "邮箱(Let's Encrypt 到期通知)" ""
-  [ -n "${OP_EMAIL:-}" ] || err "域名模式需要邮箱"
-  ask OP_PORT "面板对外端口" "443"
-else
-  DETECT_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '')"
-  ask OP_HOST "面板访问地址(公网 IP)" "${DETECT_IP:-127.0.0.1}"
-  ask OP_PORT "面板对外端口" "25510"
-fi
+DETECT_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '')"
+ask OP_PORT "服务端口(避开 80/443)" "18080"
+ask OP_HOST "访问地址(公网 IP 或主机名,用于证书与访问链接)" "${DETECT_IP:-127.0.0.1}"
 ask OP_ADMIN_USER "管理员用户名(3~32 位)" "admin"
 if [ -z "${OP_ADMIN_PASS:-}" ]; then
   ask_secret OP_ADMIN_PASS "管理员密码(≥10 位,含字母和数字)"
@@ -76,9 +63,8 @@ if [ -z "${OP_ADMIN_PASS:-}" ]; then
   [ "$OP_ADMIN_PASS" = "${OP_ADMIN_PASS2:-}" ] || err "两次密码不一致"
 fi
 case "$OP_PORT" in ''|*[!0-9]*) err "端口非法" ;; esac
+[ -n "${OP_HOST:-}" ] || err "访问地址不能为空"
 [ -n "$OP_ADMIN_PASS" ] || err "密码不能为空"
-
-# public_url:443 不带端口
 if [ "$OP_PORT" = "443" ]; then PUBURL="https://$OP_HOST"; else PUBURL="https://$OP_HOST:$OP_PORT"; fi
 
 # --- 下载并校验二进制 ---
@@ -102,39 +88,19 @@ install -m 0755 "$TMP/outpost-server-$ARCH" "$PREFIX/outpost-server"
 install -m 0755 "$TMP/outpost-agent-x86_64-unknown-linux-musl" "$VAR/dist/outpost-agent-x86_64-unknown-linux-musl"
 install -m 0755 "$TMP/outpost-agent-aarch64-unknown-linux-musl" "$VAR/dist/outpost-agent-aarch64-unknown-linux-musl"
 
-# --- 证书 ---
-if [ "$OP_MODE" = "domain" ]; then
-  info "申请 Let's Encrypt 证书(standalone,占用 80 端口验证)"
-  command -v certbot >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq certbot >/dev/null; }
-  # 续期部署钩子:复制证书到 outpost 可读位置并重启服务
-  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-  cat > /etc/letsencrypt/renewal-hooks/deploy/outpost.sh <<'HOOK'
-#!/bin/sh
-[ -n "${RENEWED_LINEAGE:-}" ] || exit 0
-install -m 0640 -o root -g outpost "$RENEWED_LINEAGE/fullchain.pem" /etc/outpost/pki/server-fullchain.pem
-install -m 0640 -o root -g outpost "$RENEWED_LINEAGE/privkey.pem"   /etc/outpost/pki/server.key
-systemctl try-restart outpost-server 2>/dev/null || true
-HOOK
-  chmod +x /etc/letsencrypt/renewal-hooks/deploy/outpost.sh
-  certbot certonly --standalone --non-interactive --agree-tos -m "$OP_EMAIL" -d "$OP_HOST" --keep-until-expiring
-  install -m 0640 -o root -g outpost "/etc/letsencrypt/live/$OP_HOST/fullchain.pem" "$ETC/pki/server-fullchain.pem"
-  install -m 0640 -o root -g outpost "/etc/letsencrypt/live/$OP_HOST/privkey.pem"   "$ETC/pki/server.key"
-  INSTALL_MODE=public_ca; CA_LINE='ca_cert_path = ""'
-else
-  info "生成自签证书"
-  cd "$ETC/pki"; umask 077
-  [ -f ca.key ] || { openssl ecparam -genkey -name prime256v1 -out ca.key
-    openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=Outpost Private CA" -out ca.pem; }
-  case "$OP_HOST" in *[!0-9.]*) SAN="DNS:$OP_HOST,IP:127.0.0.1,DNS:localhost" ;; *) SAN="IP:$OP_HOST,IP:127.0.0.1,DNS:localhost" ;; esac
-  openssl ecparam -genkey -name prime256v1 -out server.key
-  openssl req -new -key server.key -subj "/CN=$OP_HOST" -out server.csr
-  printf 'subjectAltName=%s\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$SAN" > server.ext
-  openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 825 -sha256 -extfile server.ext -out server.crt
-  cat server.crt ca.pem > server-fullchain.pem; rm -f server.csr server.ext
-  chmod 0600 ca.key server.key; chmod 0644 ca.pem server.crt server-fullchain.pem
-  cd - >/dev/null
-  INSTALL_MODE=pinned_ca; CA_LINE="ca_cert_path = \"$ETC/pki/ca.pem\""
-fi
+# --- 自签证书 ---
+info "生成自签证书"
+cd "$ETC/pki"; umask 077
+[ -f ca.key ] || { openssl ecparam -genkey -name prime256v1 -out ca.key
+  openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=Outpost Private CA" -out ca.pem; }
+case "$OP_HOST" in *[!0-9.]*) HOSTSAN="DNS:$OP_HOST" ;; *) HOSTSAN="IP:$OP_HOST" ;; esac
+openssl ecparam -genkey -name prime256v1 -out server.key
+openssl req -new -key server.key -subj "/CN=$OP_HOST" -out server.csr
+printf 'subjectAltName=%s,IP:127.0.0.1,DNS:localhost\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$HOSTSAN" > server.ext
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 825 -sha256 -extfile server.ext -out server.crt
+cat server.crt ca.pem > server-fullchain.pem; rm -f server.csr server.ext
+chmod 0600 ca.key server.key; chmod 0644 ca.pem server.crt server-fullchain.pem
+cd - >/dev/null
 
 # --- 配置 ---
 info "写入配置"
@@ -159,8 +125,8 @@ hsts = true
 db_path = "$VAR/outpost.db"
 
 [install]
-mode = "$INSTALL_MODE"
-$CA_LINE
+mode = "pinned_ca"
+ca_cert_path = "$ETC/pki/ca.pem"
 dist_dir = "$VAR/dist"
 
 [metrics]
@@ -171,8 +137,7 @@ ts_skew_secs = 300
 allow_private_targets = false
 EOF
 chown -R root:outpost "$ETC"
-chmod 0640 "$ETC/config.toml"
-[ -f "$ETC/pki/ca.key" ] && chmod 0640 "$ETC/pki/ca.key" || true
+chmod 0640 "$ETC/config.toml" "$ETC/pki/ca.key"
 
 # --- 创建管理员(密码经环境变量,不入 argv)---
 info "创建管理员账户"
@@ -231,14 +196,11 @@ if systemctl is-active --quiet outpost-server; then
   info "安装完成 ✔"
   echo "  面板地址 : $PUBURL"
   echo "  管理员   : $OP_ADMIN_USER"
-  if [ "$OP_MODE" = "domain" ]; then
-    echo "  证书     : Let's Encrypt(浏览器信任,自动续期已配置)"
-  else
-    echo "  证书     : 自签(浏览器会提示不受信任,点继续访问即可)"
-    echo "  CA 指纹  : $(sha256sum "$ETC/pki/ca.pem" | awk '{print $1}')"
-  fi
+  echo "  证书     : 自签(浏览器首次提示不受信任,点继续访问即可;流量已加密)"
+  echo "  CA 指纹  : $(sha256sum "$ETC/pki/ca.pem" | awk '{print $1}')"
   echo
-  echo "  登录后在「总览 → 添加节点」复制命令即可给其他服务器装 agent。"
+  echo "  · 登录后在「总览 → 添加节点」复制命令即可给其他服务器装 agent。"
+  echo "  · 想用域名 + 受信任证书:在本机加 nginx 反代 $PUBURL(见 README「加域名」)。"
 else
   err "服务未能启动,请查看:journalctl -u outpost-server -n 50"
 fi
