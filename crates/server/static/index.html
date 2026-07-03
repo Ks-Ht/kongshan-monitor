@@ -27,6 +27,23 @@
 <main class="wrap">
   <section class="summary" id="summary"></section>
 
+  <section class="card pad hidden" id="trendCard">
+    <div class="row-head">
+      <h3>全局趋势</h3>
+      <select id="trendRange" class="tb-sel" style="width:auto">
+        <option value="3600">最近 1 小时</option>
+        <option value="21600">最近 6 小时</option>
+        <option value="86400" selected>最近 24 小时</option>
+        <option value="604800">最近 7 天</option>
+        <option value="2592000">最近 30 天</option>
+      </select>
+    </div>
+    <div class="charts2">
+      <div class="chart-card"><h4>平均 CPU 使用率</h4><div class="chart" id="trendCpu"></div></div>
+      <div class="chart-card"><h4>内存合计(已用 / 总量)</h4><div class="chart" id="trendMem"></div></div>
+    </div>
+  </section>
+
   <div class="toolbar" id="toolbar">
     <input id="search" type="search" placeholder="搜索名称 / 主机名 / 系统…" class="tb-search">
     <select id="groupFilter" class="tb-sel"><option value="">全部分组</option></select>
@@ -57,6 +74,7 @@
 </dialog>
 
 <script src="/static/app.js?v=__V__"></script>
+<script src="/static/chart.js?v=__V__"></script>
 <script src="/static/dashboard.js?v=__V__"></script>
 </body>
 </html>

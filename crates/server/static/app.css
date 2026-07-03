@@ -235,6 +235,9 @@ input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transpare
 .spill-on { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, var(--card)); }
 .spill-off { color: var(--muted); background: color-mix(in srgb, var(--muted) 15%, var(--card)); }
 .spill-pending { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, var(--card)); }
+/* 双列图表(全局趋势) */
+.charts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .charts2 { grid-template-columns: 1fr; } }
 /* 每核 CPU 条 */
 .core-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 16px; }
 .core-item { display: flex; align-items: center; gap: 8px; }

@@ -164,6 +164,27 @@ function patchNode(id) {
   if (n && old) old.replaceWith(renderCard(n));
 }
 
+let TREND = null;
+async function loadTrend() {
+  const card = $("#trendCard");
+  if (!card) return;
+  card.classList.toggle("hidden", NODES.size === 0);
+  if (NODES.size === 0) return;
+  const secs = parseInt($("#trendRange").value, 10) || 86400;
+  let d;
+  try { d = await api("GET", "/api/overview/trend?secs=" + secs); } catch (_) { return; }
+  const ts = [], cpu = [], mu = [], mt = [];
+  for (const p of d.points) { ts.push(p[0]); cpu.push(p[1]); mu.push(p[2]); mt.push(p[3]); }
+  if (!TREND) {
+    TREND = {
+      cpu: opChart($("#trendCpu"), { series: [{ label: "平均 CPU %", colorVar: "--chart1", fill: true }], yFmt: (v) => v.toFixed(0) + "%", yMax: 100 }),
+      mem: opChart($("#trendMem"), { series: [{ label: "已用", colorVar: "--chart2", fill: true }, { label: "总量", colorVar: "--chart3" }], yFmt: fmtBytes }),
+    };
+  }
+  TREND.cpu.setData(ts, [cpu]);
+  TREND.mem.setData(ts, [mu, mt]);
+}
+
 async function load() {
   const data = await api("GET", "/api/nodes");
   INTERVAL = data.interval || 5;
@@ -179,6 +200,8 @@ async function loadAlertBadge() {
 document.addEventListener("DOMContentLoaded", async () => {
   try { await load(); } catch (e) {}
   loadAlertBadge();
+  loadTrend();
+  setInterval(loadTrend, 60000);
 
   wsConnect((m) => {
     if (m.type === "metrics" && NODES.has(m.node_id)) {
@@ -194,6 +217,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#search").addEventListener("input", renderAll);
   $("#groupFilter").addEventListener("change", renderAll);
   $("#sortBy").addEventListener("change", renderAll);
+  $("#trendRange").addEventListener("change", loadTrend);
 
   // 卡片自定义
   $("#customBtn").addEventListener("click", () => {

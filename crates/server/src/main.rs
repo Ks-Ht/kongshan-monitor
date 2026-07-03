@@ -154,6 +154,7 @@ fn build_router(st: AppState) -> Router {
         .route("/api/nodes/batch", post(handlers::nodes::batch))
         .route("/api/nodes/{id}", get(handlers::nodes::detail).delete(handlers::nodes::delete))
         .route("/api/nodes/{id}/metrics", get(handlers::nodes::history))
+        .route("/api/overview/trend", get(handlers::nodes::overview_trend))
         .route("/api/nodes/{id}/rename", post(handlers::nodes::rename))
         .route("/api/nodes/{id}/revoke", post(handlers::nodes::revoke))
         .route("/api/nodes/{id}/regen_key", post(handlers::nodes::regen_key))

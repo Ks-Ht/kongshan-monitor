@@ -300,6 +300,50 @@ pub async fn detail(
     })))
 }
 
+/// GET /api/overview/trend?secs=3600 — 全体节点汇总趋势
+/// (每桶:CPU 跨节点均值、内存跨节点合计)。近期查原始表,>2 天查聚合表。
+pub async fn overview_trend(
+    State(st): State<AppState>,
+    _user: SessionUser,
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<Value>, AppError> {
+    let secs = q.secs.clamp(300, 366 * 86400);
+    let since = unix_now().saturating_sub(secs);
+    let step = (secs / 240).max(1);
+    // 先按 (桶, 节点) 归一,再跨节点聚合,避免同节点桶内多点导致内存被重复累加
+    let points: Vec<Value> = if secs > 2 * 86400 {
+        let bstep = step.max(3600);
+        let rows = sqlx::query!(
+            r#"SELECT t as "t!: i64", AVG(cpu) as "cpu!: f64",
+                      SUM(mu) as "mem_used!: f64", SUM(mt) as "mem_total!: f64"
+               FROM (SELECT (hour_ts / ?1) * ?1 AS t, node_id,
+                            AVG(cpu_avg) AS cpu, AVG(mem_used_avg) AS mu, MAX(mem_total_max) AS mt
+                     FROM metrics_rollup WHERE hour_ts >= ?2 GROUP BY t, node_id)
+               GROUP BY t ORDER BY t"#,
+            bstep,
+            since
+        )
+        .fetch_all(&st.db)
+        .await?;
+        rows.into_iter().map(|r| json!([r.t, r.cpu, r.mem_used, r.mem_total])).collect()
+    } else {
+        let rows = sqlx::query!(
+            r#"SELECT t as "t!: i64", AVG(cpu) as "cpu!: f64",
+                      SUM(mu) as "mem_used!: f64", SUM(mt) as "mem_total!: f64"
+               FROM (SELECT (ts / ?1) * ?1 AS t, node_id,
+                            AVG(cpu_pct) AS cpu, AVG(mem_used) AS mu, MAX(mem_total) AS mt
+                     FROM metrics WHERE ts >= ?2 GROUP BY t, node_id)
+               GROUP BY t ORDER BY t"#,
+            step,
+            since
+        )
+        .fetch_all(&st.db)
+        .await?;
+        rows.into_iter().map(|r| json!([r.t, r.cpu, r.mem_used, r.mem_total])).collect()
+    };
+    Ok(Json(json!({ "step": step, "points": points })))
+}
+
 /// GET /api/nodes/{id}/metrics?secs=3600 — 历史曲线(自动按桶聚合)。
 /// 近期(≤2 天)查原始 metrics 表(高分辨率);更长范围查小时聚合表 metrics_rollup
 /// (原始表清理后仍可看长历史,且避免对大表全量扫描)。
