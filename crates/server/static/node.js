@@ -197,6 +197,13 @@ async function loadDetail() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   buildCharts();
+  // 深链接:从 URL ?secs= 恢复时间范围(仅接受按钮上的合法值)
+  const wanted = new URLSearchParams(location.search).get("secs");
+  const validSecs = $$("#rangeSeg button").map((b) => b.dataset.secs);
+  if (wanted && validSecs.includes(wanted)) {
+    curSecs = parseInt(wanted, 10);
+    $$("#rangeSeg button").forEach((b) => b.classList.toggle("active", b.dataset.secs === wanted));
+  }
   try {
     await loadDetail();
     await loadHistory();
@@ -209,6 +216,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!btn) return;
     $$("#rangeSeg button").forEach((b) => b.classList.toggle("active", b === btn));
     curSecs = parseInt(btn.dataset.secs, 10);
+    // 同步到 URL,便于分享"某节点某时段"
+    history.replaceState(null, "", location.pathname + "?secs=" + curSecs);
     await loadHistory();
   });
 
