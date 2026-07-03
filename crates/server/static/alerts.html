@@ -18,7 +18,7 @@
     <a href="/settings">设置</a>
   </nav>
   <div class="top-actions">
-    <button id="themeBtn" class="btn icon" title="切换浅色/深色">◐</button>
+    <button id="themeBtn" class="btn icon" title="切换浅色/深色" aria-label="切换浅色/深色">◐</button>
     <button id="logoutBtn" class="btn ghost sm">退出</button>
   </div>
 </header>
@@ -27,7 +27,7 @@
   <section class="card pad">
     <div class="row-head">
       <h3>当前告警 / 历史事件</h3>
-      <span id="firingCount" class="subtle"></span>
+      <span id="firingCount" class="subtle" role="status" aria-live="polite"></span>
     </div>
     <table class="tbl" id="eventTbl"></table>
   </section>
