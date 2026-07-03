@@ -261,7 +261,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) { $("#silenceMsg").textContent = err.error || "创建失败"; }
   });
 
-  // 实时:收到 alert 推送即刷新事件与角标
-  wsConnect((m) => { if (m.type === "alert") loadEvents(); });
+  // 桌面通知开关
+  function syncNotifyBtn() {
+    const on = desktopNotifyEnabled() && ("Notification" in window) && Notification.permission === "granted";
+    $("#notifyBtn").textContent = on ? "桌面通知:已开启" : "开启桌面通知";
+    $("#notifyBtn").classList.toggle("primary", on);
+  }
+  syncNotifyBtn();
+  $("#notifyBtn").addEventListener("click", async () => {
+    if (desktopNotifyEnabled()) { localStorage.setItem("op-notify", "0"); }
+    else { await enableDesktopNotify(); }
+    syncNotifyBtn();
+  });
+
+  // 实时:收到 alert 推送即刷新事件与角标;firing 时桌面通知
+  wsConnect((m) => { if (m.type === "alert") { loadEvents(); if (m.firing) notifyDesktop(m.text); } });
   setInterval(loadEvents, 30000);
 });

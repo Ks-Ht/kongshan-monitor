@@ -210,6 +210,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderSummary(); patchNode(m.node_id);
     } else if (m.type === "alert") {
       loadAlertBadge(); load().catch(() => {});
+      if (m.firing) notifyDesktop(m.text);
     }
   });
   setInterval(renderAll, 5000);

@@ -73,6 +73,27 @@ function pct(used, total) {
   return Math.min(100, Math.max(0, (used / total) * 100));
 }
 
+/* ---------- 告警桌面通知(本地开关) ---------- */
+function desktopNotifyEnabled() {
+  return localStorage.getItem("op-notify") === "1";
+}
+async function enableDesktopNotify() {
+  if (!("Notification" in window)) return false;
+  let perm = Notification.permission;
+  if (perm !== "granted") { try { perm = await Notification.requestPermission(); } catch (_) { perm = "denied"; } }
+  const ok = perm === "granted";
+  localStorage.setItem("op-notify", ok ? "1" : "0");
+  return ok;
+}
+let lastNotifyAt = 0;
+function notifyDesktop(text) {
+  if (!desktopNotifyEnabled() || !("Notification" in window) || Notification.permission !== "granted") return;
+  const now = Date.now();
+  if (now - lastNotifyAt < 1000) return; // 节流,防风暴
+  lastNotifyAt = now;
+  try { new Notification("Outpost 告警", { body: text, tag: "outpost-alert" }); } catch (_) {}
+}
+
 /* ---------- 主题(浅/深 + 配色) ---------- */
 const THEMES = [
   { id: "green", name: "森林绿", color: "#3e8e7e" },
