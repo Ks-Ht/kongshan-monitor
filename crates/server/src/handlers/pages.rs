@@ -7,17 +7,34 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
+use std::sync::OnceLock;
 
 const HTML: &str = "text/html; charset=utf-8";
 
+/// 静态资源版本号:全部资源内容的短哈希。任一 JS/CSS 变动即变化,
+/// 用于给资源 URL 加 `?v=<hash>` 做缓存失效(内容不变则 URL 不变、可长缓存)。
+fn asset_ver() -> &'static str {
+    static V: OnceLock<String> = OnceLock::new();
+    V.get_or_init(|| {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        for (_, body, _) in ASSETS {
+            h.update(body.as_bytes());
+        }
+        outpost_common::to_hex(&h.finalize()).get(..10).unwrap_or("0").to_string()
+    })
+}
+
+/// 页面 HTML:把占位 `__V__` 替换为当前资源版本(缓存失效)。
 fn page(body: &'static str) -> Response {
+    let html = body.replace("__V__", asset_ver());
     (
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, HTML),
             (header::CACHE_CONTROL, "no-cache"),
         ],
-        body,
+        html,
     )
         .into_response()
 }
@@ -42,11 +59,12 @@ const ASSETS: &[(&str, &str, &str)] = &[
 pub async fn asset(Path(name): Path<String>) -> Response {
     for (n, body, mime) in ASSETS {
         if *n == name {
+            // URL 带内容哈希 ?v=,故可长期不可变缓存;内容变→版本变→新 URL
             return (
                 StatusCode::OK,
                 [
                     (header::CONTENT_TYPE, *mime),
-                    (header::CACHE_CONTROL, "max-age=3600, must-revalidate"),
+                    (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
                 ],
                 *body,
             )

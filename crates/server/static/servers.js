@@ -12,9 +12,9 @@ function statusPill(n) {
   const online = isOnline(n);
   const cls = n.registered ? (online ? "on" : "off") : "pending";
   const txt = n.registered ? (online ? "在线" : "离线") : "待注册";
-  const p = el("span", "pill " + (cls === "on" ? "on" : "off"));
-  const dot = el("span", "dot " + cls); dot.style.marginRight = "5px";
-  p.appendChild(dot); p.appendChild(el("span", null, txt));
+  const p = el("span", "spill spill-" + cls);
+  p.appendChild(el("span", "spill-dot"));
+  p.appendChild(el("span", null, txt));
   return p;
 }
 
