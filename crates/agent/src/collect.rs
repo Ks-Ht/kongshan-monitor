@@ -75,6 +75,7 @@ impl Sampler {
         }
         let output = std::process::Command::new("systemctl")
             .arg("is-active")
+            .arg("--") // 选项终止符:防单元名以 '-' 开头被当作选项(纵深防御)
             .args(&self.watch_services)
             .output();
         let states: Vec<String> = match &output {

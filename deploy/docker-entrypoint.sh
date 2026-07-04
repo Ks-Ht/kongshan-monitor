@@ -82,7 +82,23 @@ if [ ! -f "$VAR/dist/outpost-agent-x86_64-unknown-linux-musl" ]; then
   fi
 fi
 
-# 4) 权限归属并降权运行
+# 4) 首启管理员密码卫生:仅在首启(DB 未建)且密码为空/仍是示例占位时,
+#    自动生成强随机密码并打印,避免用户直接 up 导致已知弱口令。
+PLACEHOLDER="ChangeMe_请改成强密码123"
+if [ ! -f "$VAR/outpost.db" ]; then
+  if [ -z "${OUTPOST_ADMIN_PASSWORD:-}" ] || [ "${OUTPOST_ADMIN_PASSWORD:-}" = "$PLACEHOLDER" ]; then
+    GEN="Op$(head -c 15 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-18)"
+    export OUTPOST_ADMIN_PASSWORD="$GEN"
+    echo "============================================================"
+    echo "[entrypoint] 未设置管理员密码(或仍为示例占位),已自动生成强随机密码:"
+    echo "[entrypoint]   用户名: ${OUTPOST_ADMIN_USER:-admin}"
+    echo "[entrypoint]   密码:   $GEN"
+    echo "[entrypoint] 请立即登录并在「设置」中修改;此密码仅本次日志显示。"
+    echo "============================================================"
+  fi
+fi
+
+# 5) 权限归属并降权运行
 chown -R outpost:outpost "$VAR" "$ETC" 2>/dev/null || true
 chmod 0640 "$ETC/config.toml" 2>/dev/null || true
 echo "[entrypoint] 启动服务端(用户 outpost)"

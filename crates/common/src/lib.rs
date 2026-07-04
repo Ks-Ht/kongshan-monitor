@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! outpost-common:server 与 agent 共享的协议类型与校验逻辑。
 //!
 //! 安全考量:

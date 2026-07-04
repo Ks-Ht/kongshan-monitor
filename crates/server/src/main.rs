@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! outpost-server:安全优先的私有化服务器监控面板。
 
 mod alerts;

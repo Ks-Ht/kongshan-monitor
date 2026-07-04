@@ -104,6 +104,15 @@ pub async fn enable(
     }
     tx.commit().await?;
 
+    // 启用 2FA 后吊销其它设备的既有会话(防公共电脑等旁路会话绕过 2FA 保护)
+    let _ = sqlx::query!(
+        "DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2",
+        user.user_id,
+        user.token_hash
+    )
+    .execute(&st.db)
+    .await;
+
     let ip = client_ip(peer, &headers, &st.cfg.trusted_proxy_ips());
     audit::log(&st.db, &user.username, &ip.to_string(), "2fa_enable", "").await;
     Ok(Json(json!({ "recovery_codes": codes })))
@@ -146,6 +155,16 @@ pub async fn disable(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+
+    // 停用 2FA 后同样吊销其它设备会话(登录安全态变更,保持一致)
+    let _ = sqlx::query!(
+        "DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2",
+        user.user_id,
+        user.token_hash
+    )
+    .execute(&st.db)
+    .await;
+
     let ip = client_ip(peer, &headers, &st.cfg.trusted_proxy_ips());
     audit::log(&st.db, &user.username, &ip.to_string(), "2fa_disable", "").await;
     Ok(Json(json!({ "ok": true })))

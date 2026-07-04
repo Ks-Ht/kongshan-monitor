@@ -12,9 +12,10 @@ services:
       # ↓↓↓ 改成你的公网 IP 或域名(用于证书 SAN 与访问地址)
       OP_HOST: "127.0.0.1"
       OP_PORT: "25510"
-      # 首启创建管理员(创建后此值不再使用,可留空或删除)
+      # 首启创建管理员(创建后此值不再使用)。密码留空 → 首启自动生成强随机密码
+      # 并打印到 `docker compose logs`(避免已知弱口令);也可自行填强密码。
       OUTPOST_ADMIN_USER: "admin"
-      OUTPOST_ADMIN_PASSWORD: "ChangeMe_请改成强密码123"
+      OUTPOST_ADMIN_PASSWORD: ""
       # 自签证书 + 局域网/IP 直连时设为 "false":否则浏览器拒存 Secure/__Host- cookie,
       # 表现为"登录后没反应"。有可信域名证书(反代 / 公共 CA)时保持默认 "true"。
       OP_COOKIE_SECURE: "true"

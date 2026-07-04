@@ -120,6 +120,14 @@ async fn conn_loop(st: AppState, mut sock: WebSocket, node_id: i64) {
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_activity = tokio::time::Instant::now();
 
+    // 入站消息级限流(令牌桶):防已认证但被攻破的节点用 Backfill/消息洪水放大
+    // 中心库 DB/CPU 压力。常规上报(每 interval≥1s 一条)=1 令牌;Backfill 按点数计权。
+    // 突发桶 120 覆盖重连补传(≤1000 点分块)与常规上报;稳态回填约 ≤160 点/秒。
+    const MSG_BUCKET_MAX: f64 = 120.0;
+    const MSG_REFILL_PER_SEC: f64 = 8.0;
+    let mut msg_tokens: f64 = MSG_BUCKET_MAX;
+    let mut tok_refill = tokio::time::Instant::now();
+
     loop {
         tokio::select! {
             _ = ping.tick() => {
@@ -148,6 +156,24 @@ async fn conn_loop(st: AppState, mut sock: WebSocket, node_id: i64) {
                         // 严格反序列化:未知字段/未知类型一律丢弃并记录
                         match serde_json::from_str::<AgentToServer>(txt.as_str()) {
                             Ok(m) => {
+                                // 消息级限流:Backfill 按点数计权(每 20 点约 1 令牌),其余 1 令牌
+                                let cost = match &m {
+                                    AgentToServer::Backfill { points } => {
+                                        let n = u32::try_from(points.len()).unwrap_or(u32::MAX);
+                                        (f64::from(n) / 20.0 + 1.0).min(MSG_BUCKET_MAX)
+                                    }
+                                    _ => 1.0,
+                                };
+                                let now_i = tokio::time::Instant::now();
+                                msg_tokens = (msg_tokens
+                                    + now_i.duration_since(tok_refill).as_secs_f64() * MSG_REFILL_PER_SEC)
+                                    .min(MSG_BUCKET_MAX);
+                                tok_refill = now_i;
+                                if msg_tokens < cost {
+                                    tracing::warn!(node_id, "入站消息超速,断开(防洪水放大)");
+                                    break;
+                                }
+                                msg_tokens -= cost;
                                 if handle_msg(&st, node_id, m).await.is_err() {
                                     // token 已吊销 → 立即断开
                                     tracing::info!(node_id, "token 已吊销,断开连接");

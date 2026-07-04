@@ -170,3 +170,37 @@
 | 供应链 | 新增依赖仅 `hmac`/`sha1`(RustCrypto);无新增网络出站面;`cargo deny` 通过 | ✓ |
 
 **红线复核**:安装/升级脚本仅在**用户本机主动执行**,server 端从不主动执行任何下发内容;`curl|sh` 已在文档提示"可先下载审阅"。TLS 校验无跳过分支。全部保持。
+
+## 附录 C:v0.3 全面复审(2026-07-04,多代理并行 + 依赖审计)
+
+范围:认证/会话/2FA/授权/CSRF、agent 上报通道 + 本轮新增(Backfill/systemd/top进程/TCP细分/SMTP/severity路由/silence)、前端 XSS/CSP/状态页/数据出口/容器部署/备份。三路独立代码审计结论一致:**【严重】0 项**。
+
+### C.1 本轮修复的真实缺陷
+| # | 级别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | 红线补齐 | 三 crate 缺 `#![forbid(unsafe_code)]`(仅注释无强制) | 三 crate 顶部加 `#![forbid(unsafe_code)]`,编译期强制零 unsafe(已通过编译) |
+| 2 | 中 | WS 连接建立后对入站消息无消息级限流 → 已认证但被攻破节点可用 Backfill 洪水放大中心库 DB/CPU | conn_loop 增令牌桶(桶 120、补 8/s),Backfill 按点数计权;超速即断连(ws_agent.rs) |
+| 3 | 中 | 开/关 2FA 不吊销其它设备既有会话 → 公共电脑旁路会话可绕过新开的 2FA | enable/disable 后 `DELETE FROM sessions WHERE user_id=? AND token_hash!=当前`(twofa.rs) |
+| 4 | 中(部署卫生) | `docker-compose.yml` 硬编码示例弱口令,用户直接 up 即已知口令 | 入口脚本首启(DB 未建)且密码空/占位时**自动生成强随机并打印日志**;compose 默认留空(deploy/docker-entrypoint.sh) |
+| 5 | 低(纵深) | `systemctl is-active` 单元名若以 `-` 开头会被当选项 | 加 `--` 选项终止符(collect.rs) |
+| 6 | 低(纵深) | CSP 未显式 `object-src`(default-src 已覆盖) | CSP 增 `object-src 'none'`(middleware.rs) |
+
+### C.2 审计确认的正确设计(误报澄清,非漏洞)
+- **argon2**:`Argon2::default()` = Argon2id m=19MiB t=2 p=1(OWASP 合规)。
+- **会话**:32B CSPRNG token、仅存 SHA-256、`__Host-` cookie、改密全失效、无会话固定。
+- **限速**:per-IP 桶 + per-username 指数退避;`client_ip` 只信任配置代理,X-Real-IP 不可被直连伪造。
+- **CSRF**:Origin 白名单精确匹配(含端口),缺 Origin 时要求自定义头(CORS 预检兜底)+ SameSite=Strict 双防线;`/api/agent/*` 无 cookie 认证,豁免正当。
+- **授权**:所有写端点编译期强制 `SessionUser`;API token(`opk_`)仅授 3 个 GET 只读端点,无任何写权限;单管理员模型无跨租户 IDOR。
+- **agent**:TLS 无跳过分支(红线);token 不落日志;systemd 子进程用 `Command::args` 不经 shell + 单元名 `[A-Za-z0-9@._-:]` 校验 + 仅 `is-active` + 本地配置来源(服务端不可下发)。
+- **Backfill**:不更新 last_seen/不推实时/不触发告警,污染仅限自身节点图表(信任边界内)。
+- **SSRF**:DNS 自解析后连已校验 IP(消除 rebinding)、不跟随重定向、IPv4/6 全覆盖含 v4-mapped。
+- **SMTP**:邮箱/主题禁 CRLF、body 点填充、隐式 TLS 真校验证书、凭据不落日志。
+- **前端**:全 `textContent`/`createElement` 渲染(零 innerHTML/eval);深链接 `?secs=` 白名单;桌面通知 body 纯文本。
+- **数据出口**:CSV 公式注入防护(`csv_cell` 前缀 `'`)、Prometheus 标签转义。
+- **容器**:非 root(gosu)、私钥 0600、systemd 全套沙箱、无 privileged/docker.sock、备份路径服务端派生无注入。
+
+### C.3 依赖审计
+- `cargo audit`:0 漏洞(261 依赖)。`cargo deny`:advisories/bans/licenses 全 ok。RUSTSEC-2023-0071(rsa)不在构建图,已豁免记录。
+
+### C.4 剩余低危(可选,已评估影响可忽略)
+TOTP 无重放计数(需先破 TLS)、限速/退避为内存态(重启重置,单实例可接受)、恢复码 40bit(受在线限速约束足够)、状态页 slug 48bit 熵(公开脱敏数据足够)、`/api/backup` 全库 VACUUM 可高频触发 I/O(受通用 API 限速约束)。

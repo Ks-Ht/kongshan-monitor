@@ -28,8 +28,8 @@ pub async fn security_headers(
     );
     let csp = format!(
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
-         connect-src 'self' {ws_origin}; font-src 'self'; base-uri 'none'; form-action 'self'; \
-         frame-ancestors 'none'"
+         connect-src 'self' {ws_origin}; font-src 'self'; object-src 'none'; base-uri 'none'; \
+         form-action 'self'; frame-ancestors 'none'"
     );
     if let Ok(v) = HeaderValue::from_str(&csp) {
         h.insert(header::CONTENT_SECURITY_POLICY, v);
