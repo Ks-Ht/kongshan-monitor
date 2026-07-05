@@ -314,11 +314,12 @@ async fn handle_msg(st: &AppState, node_id: i64, m: AgentToServer) -> Result<(),
             });
             let _ = st.live_tx.send(live.to_string());
 
-            // 告警评估(在 clone 出的句柄上跑,不阻断上报循环;数据已清洗)
+            // 告警评估 + 流量累计(在 clone 出的句柄上跑,不阻断上报循环;数据已清洗)
             let st2 = st.clone();
             let m2 = metrics.clone();
             tokio::spawn(async move {
                 crate::alerts::on_metrics(&st2, node_id, &m2, disk_total, disk_used).await;
+                crate::traffic::accumulate(&st2, node_id, now, rx, tx).await;
             });
             Ok(())
         }

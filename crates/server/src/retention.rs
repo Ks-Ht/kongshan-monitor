@@ -71,6 +71,7 @@ pub async fn run(st: AppState) {
         }
 
         auto_backup(&st).await;
+        crate::traffic::sweep_resets(&st).await;
     }
 }
 

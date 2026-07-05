@@ -21,6 +21,16 @@ pub struct CreateNodeReq {
     name: String,
     #[serde(default)]
     grp: String,
+    /// 流量统计是否按月清零(不启用则累计计数器一直增长,不清零)。
+    #[serde(default)]
+    traffic_reset_enabled: bool,
+    /// 每月第几天清零(1~28)。
+    #[serde(default = "default_reset_day")]
+    traffic_reset_day: i64,
+}
+
+fn default_reset_day() -> i64 {
+    1
 }
 
 #[derive(Deserialize)]
@@ -31,6 +41,10 @@ pub struct RenameReq {
     grp: String,
     #[serde(default)]
     note: String,
+    #[serde(default)]
+    traffic_reset_enabled: bool,
+    #[serde(default = "default_reset_day")]
+    traffic_reset_day: i64,
 }
 
 #[derive(Deserialize)]
@@ -118,12 +132,25 @@ pub async fn create(
 ) -> Result<Json<Value>, AppError> {
     let name = validate_node_name(&req.name)?;
     let grp = outpost_common::clean_str(&req.grp, 32);
+    if req.traffic_reset_enabled && !crate::traffic::valid_reset_day(req.traffic_reset_day) {
+        return Err(AppError::bad("每月清零日需在 1~28 之间"));
+    }
     let now = unix_now();
+    let reset_enabled = i64::from(req.traffic_reset_enabled);
+    let period_start = if req.traffic_reset_enabled {
+        crate::traffic::current_period_start(now, req.traffic_reset_day)
+    } else {
+        0
+    };
     let res = sqlx::query!(
-        "INSERT INTO nodes(name, grp, created_at) VALUES(?1, ?2, ?3)",
+        "INSERT INTO nodes(name, grp, created_at, traffic_reset_enabled, traffic_reset_day, traffic_period_start)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
         name,
         grp,
-        now
+        now,
+        reset_enabled,
+        req.traffic_reset_day,
+        period_start
     )
     .execute(&st.db)
     .await;
@@ -161,7 +188,11 @@ async fn node_summary(st: &AppState, interval: i64) -> Result<Vec<Value>, AppErr
                   token_hash, registered_at, last_seen,
                   hostname as "hostname!", os as "os!", kernel as "kernel!", arch as "arch!",
                   cores as "cores!: i64", mem_total as "mem_total!: i64",
-                  agent_version as "agent_version!"
+                  agent_version as "agent_version!",
+                  traffic_rx_total as "traffic_rx_total!: i64", traffic_tx_total as "traffic_tx_total!: i64",
+                  traffic_period_start as "traffic_period_start!: i64",
+                  traffic_reset_enabled as "traffic_reset_enabled!: i64",
+                  traffic_reset_day as "traffic_reset_day!: i64"
            FROM nodes ORDER BY id"#
     )
     .fetch_all(&st.db)
@@ -205,6 +236,11 @@ async fn node_summary(st: &AppState, interval: i64) -> Result<Vec<Value>, AppErr
             "cores": r.cores,
             "mem_total": r.mem_total,
             "agent_version": r.agent_version,
+            "traffic_rx_total": r.traffic_rx_total,
+            "traffic_tx_total": r.traffic_tx_total,
+            "traffic_period_start": r.traffic_period_start,
+            "traffic_reset_enabled": r.traffic_reset_enabled != 0,
+            "traffic_reset_day": r.traffic_reset_day,
             "latest": latest.map(|m| json!({
                 "ts": m.ts, "cpu_pct": m.cpu_pct,
                 "load1": m.load1, "load5": m.load5, "load15": m.load15,
@@ -246,7 +282,11 @@ pub async fn detail(
                   token_hash, created_at as "created_at!", registered_at, last_seen,
                   hostname as "hostname!", os as "os!", kernel as "kernel!", arch as "arch!",
                   cores as "cores!: i64", mem_total as "mem_total!: i64",
-                  agent_version as "agent_version!"
+                  agent_version as "agent_version!",
+                  traffic_rx_total as "traffic_rx_total!: i64", traffic_tx_total as "traffic_tx_total!: i64",
+                  traffic_period_start as "traffic_period_start!: i64",
+                  traffic_reset_enabled as "traffic_reset_enabled!: i64",
+                  traffic_reset_day as "traffic_reset_day!: i64"
            FROM nodes WHERE id = ?1"#,
         id
     )
@@ -285,6 +325,10 @@ pub async fn detail(
             "last_seen": r.last_seen,
             "hostname": r.hostname, "os": r.os, "kernel": r.kernel, "arch": r.arch,
             "cores": r.cores, "mem_total": r.mem_total, "agent_version": r.agent_version,
+            "traffic_rx_total": r.traffic_rx_total, "traffic_tx_total": r.traffic_tx_total,
+            "traffic_period_start": r.traffic_period_start,
+            "traffic_reset_enabled": r.traffic_reset_enabled != 0,
+            "traffic_reset_day": r.traffic_reset_day,
         },
         "latest": latest.map(|m| json!({
             "ts": m.ts, "cpu_pct": m.cpu_pct,
@@ -416,11 +460,26 @@ pub async fn rename(
     let name = validate_node_name(&req.name)?;
     let grp = outpost_common::clean_str(&req.grp, 32);
     let note = outpost_common::clean_str(&req.note, 200);
+    if req.traffic_reset_enabled && !crate::traffic::valid_reset_day(req.traffic_reset_day) {
+        return Err(AppError::bad("每月清零日需在 1~28 之间"));
+    }
+    let reset_enabled = i64::from(req.traffic_reset_enabled);
+    // 仅更新记账基准,不在此处清零计数器;真正的清零由每小时巡检在跨周期边界时执行。
+    let period_start = if req.traffic_reset_enabled {
+        crate::traffic::current_period_start(unix_now(), req.traffic_reset_day)
+    } else {
+        0
+    };
     let res = sqlx::query!(
-        "UPDATE nodes SET name = ?1, grp = ?2, note = ?3 WHERE id = ?4",
+        "UPDATE nodes SET name = ?1, grp = ?2, note = ?3,
+                traffic_reset_enabled = ?4, traffic_reset_day = ?5, traffic_period_start = ?6
+         WHERE id = ?7",
         name,
         grp,
         note,
+        reset_enabled,
+        req.traffic_reset_day,
+        period_start,
         id
     )
     .execute(&st.db)

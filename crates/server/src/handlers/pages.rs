@@ -25,9 +25,9 @@ fn asset_ver() -> &'static str {
     })
 }
 
-/// 页面 HTML:把占位 `__V__` 替换为当前资源版本(缓存失效)。
+/// 页面 HTML:把占位 `__V__` 替换为当前资源版本(缓存失效),`__VERSION__` 替换为程序版本号。
 fn page(body: &'static str) -> Response {
-    let html = body.replace("__V__", asset_ver());
+    let html = body.replace("__V__", asset_ver()).replace("__VERSION__", env!("CARGO_PKG_VERSION"));
     (
         StatusCode::OK,
         [

@@ -56,7 +56,7 @@ async function load() {
     }
     grid.appendChild(c);
   }
-  $("#foot").textContent = "更新于 " + fmtTime(d.now) + " · Outpost 哨站";
+  $("#foot").textContent = "更新于 " + fmtTime(d.now) + " · 空山Outpost";
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Outpost 哨站 · 节点</title>
+<title>空山Outpost · 节点</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v=__V__">
 </head>
 <body data-page="node" data-auth="1">
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-dot"></span>Outpost 哨站</a>
+  <a class="brand" href="/"><span class="brand-dot"></span>空山Outpost</a>
   <nav class="nav">
     <a href="/">总览</a>
     <a href="/servers">服务器</a>
@@ -49,6 +49,11 @@
       <button data-secs="604800">7 天</button>
       <button data-secs="2592000">30 天</button>
       <button data-secs="7776000">90 天</button>
+    </div>
+    <span class="subtle">图表</span>
+    <div class="seg" id="chartOptSeg">
+      <button data-opt="smooth">平滑</button>
+      <button data-opt="dots">数据点</button>
     </div>
   </div>
 
@@ -93,5 +98,6 @@
 <script src="/static/app.js?v=__V__"></script>
 <script src="/static/chart.js?v=__V__"></script>
 <script src="/static/node.js?v=__V__"></script>
+<footer class="site-footer">空山Outpost v__VERSION__</footer>
 </body>
 </html>

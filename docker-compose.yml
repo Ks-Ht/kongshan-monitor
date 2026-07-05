@@ -1,4 +1,4 @@
-# Outpost 哨站 服务端 — 一条命令部署:  docker compose up -d --build
+# 空山Outpost 服务端 — 一条命令部署:  docker compose up -d --build
 # 首次启动会自动:生成自签证书、写配置、创建管理员、拉取 agent 二进制。
 services:
   outpost:

@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-# Outpost 哨站 — 服务端一键安装脚本(高位端口 + 自签 TLS,不占用 80/443)
+# 空山Outpost — 服务端一键安装脚本(高位端口 + 自签 TLS,不占用 80/443)
 #
 #   curl -fsSL https://github.com/Ks-Ht/kongshan-monitor/releases/latest/download/server-install.sh | sh
 #
@@ -52,7 +52,7 @@ ask_secret() {
   printf '\n' > "$TTY"; eval "$1=\"\$ans\""
 }
 
-info "Outpost 哨站 服务端安装(架构 $ARCH,版本 $VERSION)"
+info "空山Outpost 服务端安装(架构 $ARCH,版本 $VERSION)"
 DETECT_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '')"
 ask OP_PORT "服务端口(避开 80/443)" "18080"
 ask OP_HOST "访问地址(公网 IP 或主机名,用于证书与访问链接)" "${DETECT_IP:-127.0.0.1}"

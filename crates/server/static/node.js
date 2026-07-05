@@ -11,6 +11,14 @@ let charts = {};
 let curSecs = 3600;
 let nodeInfo = null;
 
+/* 进程占用 Top 排序状态(默认按 CPU 降序,与原行为一致) */
+let topProcSort = { key: "cpu_pct", dir: -1 };
+const TOP_PROC_COLS = [
+  { key: "name", label: "进程", get: (p) => (p.name || "").toLowerCase() },
+  { key: "cpu_pct", label: "CPU", get: (p) => p.cpu_pct || 0 },
+  { key: "rss", label: "内存(RSS)", get: (p) => p.rss || 0 },
+];
+
 function statCard(label, value, sub) {
   const c = el("div", "card stat");
   c.appendChild(el("div", "s-label", label));
@@ -33,6 +41,13 @@ function renderStats(n, m) {
     fmtBytes(m.disk_used) + " / " + fmtBytes(m.disk_total)));
   row.appendChild(statCard("网络", "↓" + fmtBps(m.net_rx_bps), "↑" + fmtBps(m.net_tx_bps)));
   row.appendChild(statCard("运行时长", fmtDur(m.uptime_secs), "进程 " + m.procs));
+  const trafficTotal = (n.traffic_rx_total || 0) + (n.traffic_tx_total || 0);
+  row.appendChild(statCard(
+    n.traffic_reset_enabled ? "流量(本期)" : "流量(累计)",
+    fmtBytes(trafficTotal),
+    "↓" + fmtBytes(n.traffic_rx_total || 0) + " ↑" + fmtBytes(n.traffic_tx_total || 0)
+    + (n.traffic_reset_enabled ? " · 每月 " + n.traffic_reset_day + " 日清零" : "")
+  ));
 }
 
 function renderSysInfo(n, m) {
@@ -58,6 +73,7 @@ function renderSysInfo(n, m) {
     ["CPU 温度", temp],
     ["TCP 连接", tcp],
     ["磁盘 IOPS", iops],
+    ["本期流量统计起", n.traffic_reset_enabled && n.traffic_period_start ? fmtTime(n.traffic_period_start) : "未启用清零(累计不清零)"],
   ];
   for (const [k, v] of rows) {
     dl.appendChild(el("dt", null, k));
@@ -118,15 +134,31 @@ function renderTables(detail) {
     });
   }
 
-  // 进程占用 Top(按 CPU)
+  // 进程占用 Top(可按列点击排序,升/降序切换)
   const tpcard = $("#topProcCard");
-  const tops = (detail && detail.top_procs) || [];
+  const tops = ((detail && detail.top_procs) || []).slice();
   if (tpcard) {
     tpcard.classList.toggle("hidden", tops.length === 0);
+    const col = TOP_PROC_COLS.find((c) => c.key === topProcSort.key) || TOP_PROC_COLS[1];
+    tops.sort((a, b) => {
+      const av = col.get(a), bv = col.get(b);
+      if (av < bv) return -1 * topProcSort.dir;
+      if (av > bv) return topProcSort.dir;
+      return 0;
+    });
     const tt = $("#topProcTbl");
     tt.replaceChildren();
     const tth = el("tr");
-    ["进程", "CPU", "内存(RSS)"].forEach((h) => tth.appendChild(el("th", null, h)));
+    TOP_PROC_COLS.forEach((c) => {
+      const arrow = topProcSort.key === c.key ? (topProcSort.dir === 1 ? " ▲" : " ▼") : "";
+      const th = el("th", "th-sort", c.label + arrow);
+      th.addEventListener("click", () => {
+        if (topProcSort.key === c.key) topProcSort.dir *= -1;
+        else topProcSort = { key: c.key, dir: c.key === "name" ? 1 : -1 };
+        renderTables(detail);
+      });
+      tth.appendChild(th);
+    });
     tt.appendChild(tth);
     for (const p of tops) {
       const tr = el("tr");
@@ -254,7 +286,7 @@ async function loadDetail() {
   $("#nodeSub").textContent = (d.node.grp ? "[" + d.node.grp + "] " : "") +
     (d.node.hostname || "") + (d.node.note ? " · " + d.node.note : "") +
     (d.node.revoked && !d.node.registered ? " · token 已吊销" : "");
-  document.title = "Outpost 哨站 · " + d.node.name;
+  document.title = "空山Outpost · " + d.node.name;
   renderStats(d.node, d.latest);
   renderSysInfo(d.node, d.latest);
   renderTables(d.latest && d.latest.detail);

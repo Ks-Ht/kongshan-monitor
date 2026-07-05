@@ -58,7 +58,7 @@ pub async fn setup(State(st): State<AppState>, user: SessionUser) -> Result<Json
     sqlx::query!("UPDATE users SET totp_secret = ?1 WHERE id = ?2", secret, user.user_id)
         .execute(&st.db)
         .await?;
-    let uri = crate::totp::provisioning_uri(&secret, &user.username, "Outpost");
+    let uri = crate::totp::provisioning_uri(&secret, &user.username, "空山Outpost");
     Ok(Json(json!({ "secret": secret, "uri": uri })))
 }
 

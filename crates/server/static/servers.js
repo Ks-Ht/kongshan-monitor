@@ -18,10 +18,53 @@ function statusPill(n) {
   return p;
 }
 
+/* 流量单元格:未启用清零显示"总计",启用后显示"本期(周期起)" */
+function fmtTrafficCell(n) {
+  const total = (n.traffic_rx_total || 0) + (n.traffic_tx_total || 0);
+  const sum = fmtBytes(total) + "(↓" + fmtBytes(n.traffic_rx_total || 0) + " ↑" + fmtBytes(n.traffic_tx_total || 0) + ")";
+  if (!n.traffic_reset_enabled) return sum;
+  return sum + " · 每月 " + n.traffic_reset_day + " 日清零";
+}
+
+/* ---- 排序 ---- */
+function statusRank(n) {
+  if (!n.registered) return 0; // 待注册
+  return isOnline(n) ? 2 : 1; // 离线=1,在线=2(降序时在线排前面)
+}
+const SORT_COLS = [
+  { key: "name", label: "名称", get: (n) => (n.name || "").toLowerCase() },
+  { key: "grp", label: "分组", get: (n) => (n.grp || "").toLowerCase() },
+  { key: "note", label: "备注", get: (n) => (n.note || "").toLowerCase() },
+  { key: "status", label: "状态", get: statusRank },
+  { key: "host", label: "主机/系统", get: (n) => (n.hostname || "").toLowerCase() },
+  { key: "agent", label: "Agent", get: (n) => n.agent_version || "" },
+  { key: "traffic", label: "流量(本期)", get: (n) => (n.traffic_rx_total || 0) + (n.traffic_tx_total || 0) },
+  { key: "last_seen", label: "最后上报", get: (n) => n.last_seen || 0 },
+];
+let sortKey = localStorage.getItem("op-srv-sort-key") || "name";
+let sortDir = parseInt(localStorage.getItem("op-srv-sort-dir") || "1", 10) || 1;
+function setSort(key) {
+  if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+  localStorage.setItem("op-srv-sort-key", sortKey);
+  localStorage.setItem("op-srv-sort-dir", String(sortDir));
+  render();
+}
+function sortNodes(list) {
+  const col = SORT_COLS.find((c) => c.key === sortKey) || SORT_COLS[0];
+  list.sort((a, b) => {
+    const av = col.get(a), bv = col.get(b);
+    if (av < bv) return -1 * sortDir;
+    if (av > bv) return sortDir;
+    return 0;
+  });
+  return list;
+}
+
 function render() {
   const q = $("#search").value.trim().toLowerCase();
   let list = NODES.slice();
   if (q) list = list.filter((n) => [n.name, n.hostname, n.grp, n.os].some((s) => (s || "").toLowerCase().includes(q)));
+  sortNodes(list);
 
   const admin = !isViewer();
   const tbl = $("#srvTbl");
@@ -36,7 +79,12 @@ function render() {
     });
     const th0 = el("th"); th0.appendChild(allCb); head.appendChild(th0);
   }
-  ["名称", "分组", "备注", "状态", "主机/系统", "Agent", "最后上报"].forEach((h) => head.appendChild(el("th", null, h)));
+  SORT_COLS.forEach((c) => {
+    const arrow = sortKey === c.key ? (sortDir === 1 ? " ▲" : " ▼") : "";
+    const th = el("th", "th-sort", c.label + arrow);
+    th.addEventListener("click", () => setSort(c.key));
+    head.appendChild(th);
+  });
   if (admin) head.appendChild(el("th", null, "操作"));
   tbl.appendChild(head);
 
@@ -57,6 +105,7 @@ function render() {
     const stTd = el("td"); stTd.appendChild(statusPill(n)); tr.appendChild(stTd);
     tr.appendChild(el("td", "subtle", (n.hostname || "—") + (n.os ? " · " + n.os : "")));
     tr.appendChild(el("td", "subtle", n.agent_version || "—"));
+    tr.appendChild(el("td", "subtle", fmtTrafficCell(n)));
     tr.appendChild(el("td", "subtle", n.last_seen ? timeAgo(n.last_seen) : "从未"));
 
     if (admin) {
@@ -84,7 +133,7 @@ function render() {
   }
   if (!list.length) {
     const tr = el("tr"); const td = el("td", "subtle", NODES.length ? "无匹配" : "还没有服务器,点右上角「添加节点」");
-    td.colSpan = admin ? 9 : 7; tr.appendChild(td); tbl.appendChild(tr);
+    td.colSpan = admin ? 10 : 8; tr.appendChild(td); tbl.appendChild(tr);
   }
   updateBatch();
 }
@@ -109,6 +158,9 @@ let editingId = null;
 function openEdit(n) {
   editingId = n.id;
   $("#eName").value = n.name; $("#eGrp").value = n.grp || ""; $("#eNote").value = n.note || "";
+  $("#eTrafficReset").checked = !!n.traffic_reset_enabled;
+  $("#eTrafficDay").value = n.traffic_reset_day || 1;
+  $("#eTrafficDayRow").classList.toggle("hidden", !n.traffic_reset_enabled);
   $("#editMsg").textContent = "";
   $("#editDlg").showModal();
 }
@@ -163,12 +215,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#batchSetGrp").addEventListener("click", () => batch("set_group", { grp: $("#batchGrp").value.trim() }));
 
   // 编辑保存
+  $("#eTrafficReset").addEventListener("change", () => {
+    $("#eTrafficDayRow").classList.toggle("hidden", !$("#eTrafficReset").checked);
+  });
   $("#editForm").addEventListener("submit", async (e) => {
     if (e.submitter && e.submitter.value === "cancel") return;
     e.preventDefault();
     try {
       await api("POST", "/api/nodes/" + editingId + "/rename", {
         name: $("#eName").value.trim(), grp: $("#eGrp").value.trim(), note: $("#eNote").value.trim(),
+        traffic_reset_enabled: $("#eTrafficReset").checked,
+        traffic_reset_day: parseInt($("#eTrafficDay").value, 10) || 1,
       });
       $("#editDlg").close(); load();
     } catch (err) { $("#editMsg").textContent = err.error || "保存失败"; }
@@ -176,9 +233,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 添加节点
   const dlg = $("#addDlg");
+  $("#nodeTrafficReset").addEventListener("change", () => {
+    $("#nodeTrafficDayRow").classList.toggle("hidden", !$("#nodeTrafficReset").checked);
+  });
   $("#addNodeBtn").addEventListener("click", () => {
     $("#addStep1").classList.remove("hidden"); $("#addStep2").classList.add("hidden");
-    $("#nodeName").value = ""; $("#nodeGrp").value = ""; dlg.showModal();
+    $("#nodeName").value = ""; $("#nodeGrp").value = "";
+    $("#nodeTrafficReset").checked = false; $("#nodeTrafficDay").value = 1;
+    $("#nodeTrafficDayRow").classList.add("hidden");
+    dlg.showModal();
   });
   $("#addForm").addEventListener("submit", async (e) => {
     if (e.submitter && e.submitter.value === "cancel") return;
@@ -186,7 +249,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     const btn = $("#createBtn"); btn.disabled = true;
     try {
-      const r = await api("POST", "/api/nodes", { name: $("#nodeName").value.trim(), grp: $("#nodeGrp").value.trim() });
+      const r = await api("POST", "/api/nodes", {
+        name: $("#nodeName").value.trim(), grp: $("#nodeGrp").value.trim(),
+        traffic_reset_enabled: $("#nodeTrafficReset").checked,
+        traffic_reset_day: parseInt($("#nodeTrafficDay").value, 10) || 1,
+      });
       $("#installCmd").textContent = r.command;
       $("#addStep1").classList.add("hidden"); $("#addStep2").classList.remove("hidden");
       await load();

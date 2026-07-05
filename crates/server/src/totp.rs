@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn uri_encodes_specials() {
-        let u = provisioning_uri("ABC234", "admin user", "Outpost 哨站");
+        let u = provisioning_uri("ABC234", "admin user", "空山Outpost");
         assert!(u.contains("secret=ABC234"));
         assert!(u.contains("admin%20user"));
         assert!(!u.contains(' '));

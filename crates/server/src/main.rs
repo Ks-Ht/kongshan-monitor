@@ -16,6 +16,7 @@ mod retention;
 mod session;
 mod state;
 mod totp;
+mod traffic;
 mod util;
 
 use crate::config::Config;

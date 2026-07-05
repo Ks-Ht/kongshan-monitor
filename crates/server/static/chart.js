@@ -1,6 +1,53 @@
 /* 自写轻量 canvas 时间序列图(~4KB):零第三方依赖,完全可审计。
-   特性:多序列折线+面积、自适应刻度、DPR 渲染、悬浮十字线与数值、主题联动。 */
+   特性:多序列折线+面积、自适应刻度、DPR 渲染、悬浮十字线与数值、主题联动、
+   平滑曲线/数据点两个全局展示选项(localStorage 记忆,所有图表联动)。 */
 "use strict";
+
+/* ---------- 全局图表展示选项(所有 opChart 实例共享联动) ---------- */
+const CHART_PREFS = {
+  smooth: localStorage.getItem("op-chart-smooth") !== "0", // 默认开
+  dots: localStorage.getItem("op-chart-dots") === "1", // 默认关
+};
+const ALL_CHARTS = [];
+function setChartPref(key, val) {
+  CHART_PREFS[key] = val;
+  localStorage.setItem("op-chart-" + key, val ? "1" : "0");
+  ALL_CHARTS.forEach((c) => c.draw());
+}
+/* 页面里若有 #chartOptSeg 工具条(data-opt="smooth"/"dots" 按钮),自动接管其状态与点击。 */
+function bindChartOptSeg() {
+  const seg = document.getElementById("chartOptSeg");
+  if (!seg) return;
+  const btns = Array.from(seg.querySelectorAll("button[data-opt]"));
+  const sync = () => btns.forEach((b) => b.classList.toggle("active", !!CHART_PREFS[b.dataset.opt]));
+  sync();
+  seg.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-opt]");
+    if (!btn) return;
+    setChartPref(btn.dataset.opt, !CHART_PREFS[btn.dataset.opt]);
+    sync();
+  });
+}
+document.addEventListener("DOMContentLoaded", bindChartOptSeg);
+
+/* Catmull-Rom → 三次贝塞尔平滑曲线(张力 1/6,业界常用近似)。pts 至少 2 个点。 */
+function drawCurve(ctx, pts, smooth) {
+  if (pts.length < 2) return;
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (!smooth || pts.length < 3) {
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    return;
+  }
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+  }
+}
 
 function opChart(container, opts) {
   const series = opts.series; // [{label, colorVar, fill}]
@@ -109,30 +156,46 @@ function opChart(container, opts) {
       ctx.fillText(label, xOf(t), H - 6);
     }
 
-    // 序列
+    // 序列:按连续无 null 的"段"分别绘制(可平滑曲线/可选数据点,各段各自补面)
     const cs = colors();
     series.forEach((s, si) => {
       const arr = data[si];
-      ctx.beginPath();
-      let started = false;
+      const runs = [];
+      let cur = [];
       for (let i = 0; i < ts.length; i++) {
         const v = arr[i];
-        if (v == null) { started = false; continue; }
-        const x = xOf(ts[i]), y = yOf(Math.min(v, hi));
-        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        if (v == null) { if (cur.length) runs.push(cur); cur = []; continue; }
+        cur.push({ x: xOf(ts[i]), y: yOf(Math.min(v, hi)) });
       }
+      if (cur.length) runs.push(cur);
+
       ctx.strokeStyle = cs[si];
       ctx.lineWidth = 1.6;
       ctx.lineJoin = "round";
-      ctx.stroke();
-      if (s.fill) {
-        ctx.lineTo(xOf(t1), yOf(lo));
-        ctx.lineTo(xOf(ts.find((_, i) => arr[i] != null) ?? t0), yOf(lo));
-        ctx.closePath();
-        ctx.globalAlpha = 0.12;
+      ctx.lineCap = "round";
+      for (const run of runs) {
+        ctx.beginPath();
+        drawCurve(ctx, run, CHART_PREFS.smooth);
+        ctx.stroke();
+        if (s.fill) {
+          ctx.lineTo(run[run.length - 1].x, yOf(lo));
+          ctx.lineTo(run[0].x, yOf(lo));
+          ctx.closePath();
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = cs[si];
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
+      if (CHART_PREFS.dots) {
         ctx.fillStyle = cs[si];
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        for (const run of runs) {
+          for (const p of run) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
     });
 
@@ -182,7 +245,7 @@ function opChart(container, opts) {
   ro.observe(container);
   document.addEventListener("op-theme", () => { rebuildLegend(); draw(); });
 
-  return {
+  const controller = {
     setData(newTs, newData) { ts = newTs; data = newData; draw(); },
     append(t, values, maxPoints) {
       ts.push(t);
@@ -194,5 +257,8 @@ function opChart(container, opts) {
       }
       draw();
     },
+    draw, // 供全局展示选项切换时统一重绘
   };
+  ALL_CHARTS.push(controller);
+  return controller;
 }

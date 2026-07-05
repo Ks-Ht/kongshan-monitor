@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Outpost 哨站 · 服务器管理</title>
+<title>空山Outpost · 服务器管理</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v=__V__">
 </head>
 <body data-page="servers" data-auth="1">
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-dot"></span>Outpost 哨站</a>
+  <a class="brand" href="/"><span class="brand-dot"></span>空山Outpost</a>
   <nav class="nav">
     <a href="/">总览</a>
     <a href="/servers" class="active">服务器</a>
@@ -50,6 +50,10 @@
     <div id="addStep1">
       <label>节点名称 <input id="nodeName" type="text" maxlength="64" required placeholder="例如:web-1"></label>
       <label>分组(可选) <input id="nodeGrp" type="text" maxlength="32" placeholder="例如:生产"></label>
+      <label><input id="nodeTrafficReset" type="checkbox" style="width:auto;display:inline;vertical-align:middle;margin-right:6px"> 流量统计按月清零</label>
+      <label id="nodeTrafficDayRow" class="hidden">每月第几天清零
+        <input id="nodeTrafficDay" type="number" min="1" max="28" value="1">
+      </label>
       <div class="dlg-actions">
         <button value="cancel" class="btn ghost" formnovalidate>取消</button>
         <button id="createBtn" value="default" class="btn primary" type="submit">创建并生成命令</button>
@@ -72,6 +76,11 @@
     <label>名称 <input id="eName" type="text" maxlength="64" required></label>
     <label>分组 <input id="eGrp" type="text" maxlength="32"></label>
     <label>备注 <input id="eNote" type="text" maxlength="200"></label>
+    <label><input id="eTrafficReset" type="checkbox" style="width:auto;display:inline;vertical-align:middle;margin-right:6px"> 流量统计按月清零</label>
+    <label id="eTrafficDayRow" class="hidden">每月第几天清零
+      <input id="eTrafficDay" type="number" min="1" max="28" value="1">
+    </label>
+    <p class="hint subtle">流量按上报速率估算,非精确抓包计费口径;不启用清零则一直累计不清零。</p>
     <div class="dlg-actions">
       <button value="cancel" class="btn ghost" formnovalidate>取消</button>
       <button class="btn primary" type="submit">保存</button>
@@ -94,5 +103,6 @@
 
 <script src="/static/app.js?v=__V__"></script>
 <script src="/static/servers.js?v=__V__"></script>
+<footer class="site-footer">空山Outpost v__VERSION__</footer>
 </body>
 </html>

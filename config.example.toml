@@ -1,4 +1,4 @@
-# Outpost 哨站 — 服务端配置示例(带注释)。
+# 空山Outpost — 服务端配置示例(带注释)。
 # 实际部署:复制到 /etc/outpost/config.toml,权限 0640 root:outpost。
 # 所有项均可用环境变量覆盖:OUTPOST_SERVER__LISTEN、OUTPOST_SECURITY__HSTS 等。
 
