@@ -44,7 +44,9 @@ async function load() {
     const c = el("div", "card node-card");
     const head = el("div", "nc-head");
     head.appendChild(el("span", "dot " + (n.online ? "on" : "off")));
-    head.appendChild(el("span", "nc-name", n.name));
+    const spNameEl = el("span", "nc-name", n.name);
+    spNameEl.title = n.name;
+    head.appendChild(spNameEl);
     if (n.grp) head.appendChild(el("span", "nc-grp", n.grp));
     c.appendChild(head);
     if (n.online) {

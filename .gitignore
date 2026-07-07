@@ -6,3 +6,4 @@ crates/server/.dev/
 *.db-wal
 *.db-shm
 .DS_Store
+/.claude/

@@ -4,6 +4,32 @@
 let NODES = [];
 const SELECTED = new Set();
 let INTERVAL = 5;
+let dragSortOn = localStorage.getItem("op-srv-dragsort") === "1";
+let dragFromId = null;
+
+/* ---- 分组下拉(仅"新增分组"时才输入文本) ---- */
+function knownGroups() {
+  return Array.from(new Set(NODES.map((n) => n.grp).filter(Boolean))).sort();
+}
+function populateGroupSelect(sel, current) {
+  sel.replaceChildren();
+  sel.appendChild(new Option("(无分组)", ""));
+  for (const g of knownGroups()) sel.appendChild(new Option(g, g));
+  sel.appendChild(new Option("+ 新增分组…", "__new__"));
+  sel.value = current && knownGroups().includes(current) ? current : (current ? "__new__" : "");
+}
+function wireGroupSelect(selEl, newRowEl, newInputEl, current) {
+  populateGroupSelect(selEl, current);
+  newRowEl.classList.toggle("hidden", selEl.value !== "__new__");
+  if (selEl.value === "__new__") newInputEl.value = current || "";
+  selEl.onchange = () => {
+    newRowEl.classList.toggle("hidden", selEl.value !== "__new__");
+    if (selEl.value === "__new__") { newInputEl.value = ""; newInputEl.focus(); }
+  };
+}
+function groupSelectValue(selEl, newInputEl) {
+  return selEl.value === "__new__" ? newInputEl.value.trim() : selEl.value;
+}
 
 function isOnline(n) {
   return n.last_seen && (Date.now() / 1000 - n.last_seen <= Math.max(INTERVAL * 3, 10));
@@ -26,21 +52,62 @@ function fmtTrafficCell(n) {
   return sum + " · 每月 " + n.traffic_reset_day + " 日清零";
 }
 
-/* ---- 排序 ---- */
+/* ---- 列(名称固定始终显示;其余均可通过「自定义列」勾选) ---- */
 function statusRank(n) {
   if (!n.registered) return 0; // 待注册
   return isOnline(n) ? 2 : 1; // 离线=1,在线=2(降序时在线排前面)
 }
-const SORT_COLS = [
-  { key: "name", label: "名称", get: (n) => (n.name || "").toLowerCase() },
-  { key: "grp", label: "分组", get: (n) => (n.grp || "").toLowerCase() },
-  { key: "note", label: "备注", get: (n) => (n.note || "").toLowerCase() },
-  { key: "status", label: "状态", get: statusRank },
-  { key: "host", label: "主机/系统", get: (n) => (n.hostname || "").toLowerCase() },
-  { key: "agent", label: "Agent", get: (n) => n.agent_version || "" },
-  { key: "traffic", label: "流量(本期)", get: (n) => (n.traffic_rx_total || 0) + (n.traffic_tx_total || 0) },
-  { key: "last_seen", label: "最后上报", get: (n) => n.last_seen || 0 },
+const COLUMN_CATALOG = [
+  { key: "status", label: "状态", sort: statusRank,
+    render: (n) => { const td = el("td", "nowrap"); td.appendChild(statusPill(n)); return td; } },
+  { key: "grp", label: "分组", sort: (n) => (n.grp || "").toLowerCase(),
+    render: (n) => { const td = el("td", "nowrap", n.grp || "—"); if (n.grp) td.title = n.grp; return td; } },
+  { key: "note", label: "备注", sort: (n) => (n.note || "").toLowerCase(),
+    render: (n) => { const td = el("td", "subtle nowrap nowrap-tight", n.note || "—"); if (n.note) td.title = n.note; return td; } },
+  { key: "host", label: "主机/系统", sort: (n) => (n.hostname || "").toLowerCase(),
+    render: (n) => { const t = (n.hostname || "—") + (n.os ? " · " + n.os : ""); const td = el("td", "subtle nowrap", t); td.title = t; return td; } },
+  { key: "ip", label: "IP", sort: (n) => n.last_ip || "",
+    render: (n) => { const td = el("td", "subtle nowrap", n.last_ip || "—"); if (n.last_ip) td.title = n.last_ip; return td; } },
+  { key: "kernel", label: "内核", sort: (n) => (n.kernel || "").toLowerCase(),
+    render: (n) => { const td = el("td", "subtle nowrap", n.kernel || "—"); if (n.kernel) td.title = n.kernel; return td; } },
+  { key: "arch", label: "架构", sort: (n) => (n.arch || "").toLowerCase(),
+    render: (n) => el("td", "subtle nowrap", n.arch ? n.arch + " · " + n.cores + " 核" : "—") },
+  { key: "mem", label: "内存", sort: (n) => n.mem_total || 0,
+    render: (n) => el("td", "subtle nowrap", n.mem_total ? fmtBytes(n.mem_total) : "—") },
+  { key: "cpu_now", label: "CPU", sort: (n) => (n.latest ? n.latest.cpu_pct : -1),
+    render: (n) => el("td", "subtle nowrap", n.latest ? n.latest.cpu_pct.toFixed(0) + "%" : "—") },
+  { key: "load", label: "负载", sort: (n) => (n.latest ? n.latest.load1 : -1),
+    render: (n) => el("td", "subtle nowrap", n.latest ? n.latest.load1.toFixed(2) : "—") },
+  { key: "uptime", label: "运行时长", sort: (n) => (n.latest ? n.latest.uptime_secs : -1),
+    render: (n) => el("td", "subtle nowrap", n.latest ? fmtDur(n.latest.uptime_secs) : "—") },
+  { key: "agent", label: "Agent", sort: (n) => n.agent_version || "",
+    render: (n) => el("td", "subtle nowrap", n.agent_version || "—") },
+  { key: "traffic", label: "流量(本期)", sort: (n) => (n.traffic_rx_total || 0) + (n.traffic_tx_total || 0),
+    render: (n) => { const t = fmtTrafficCell(n); const td = el("td", "subtle nowrap", t); td.title = t; return td; } },
+  { key: "registered_at", label: "接入时间", sort: (n) => n.registered_at || 0,
+    render: (n) => el("td", "subtle nowrap", n.registered_at ? fmtTime(n.registered_at) : "—") },
+  { key: "last_seen", label: "最后上报", sort: (n) => n.last_seen || 0,
+    render: (n) => el("td", "subtle nowrap", n.last_seen ? timeAgo(n.last_seen) : "从未") },
 ];
+const DEFAULT_COLS = ["status", "grp", "note", "host", "agent", "traffic", "last_seen"];
+function srvCols() {
+  try {
+    const v = JSON.parse(localStorage.getItem("op-srv-cols") || "null");
+    if (Array.isArray(v) && v.length) {
+      const filtered = v.filter((k) => COLUMN_CATALOG.some((c) => c.key === k));
+      if (filtered.length) return filtered;
+    }
+  } catch (_) {}
+  return DEFAULT_COLS.slice();
+}
+let COLS = srvCols();
+
+/* ---- 排序(名称始终可排;其余取决于当前显示的列) ---- */
+function sortGetter(key) {
+  if (key === "name") return (n) => (n.name || "").toLowerCase();
+  const col = COLUMN_CATALOG.find((c) => c.key === key);
+  return col ? col.sort : (n) => (n.name || "").toLowerCase();
+}
 let sortKey = localStorage.getItem("op-srv-sort-key") || "name";
 let sortDir = parseInt(localStorage.getItem("op-srv-sort-dir") || "1", 10) || 1;
 function setSort(key) {
@@ -50,9 +117,11 @@ function setSort(key) {
   render();
 }
 function sortNodes(list) {
-  const col = SORT_COLS.find((c) => c.key === sortKey) || SORT_COLS[0];
+  // 排序列被隐藏后不再有意义,自动回退到按名称排序
+  const key = (sortKey === "name" || COLS.includes(sortKey)) ? sortKey : "name";
+  const get = sortGetter(key);
   list.sort((a, b) => {
-    const av = col.get(a), bv = col.get(b);
+    const av = get(a), bv = get(b);
     if (av < bv) return -1 * sortDir;
     if (av > bv) return sortDir;
     return 0;
@@ -61,15 +130,22 @@ function sortNodes(list) {
 }
 
 function render() {
+  const admin = !isViewer();
   const q = $("#search").value.trim().toLowerCase();
   let list = NODES.slice();
-  if (q) list = list.filter((n) => [n.name, n.hostname, n.grp, n.os].some((s) => (s || "").toLowerCase().includes(q)));
-  sortNodes(list);
+  if (dragSortOn) {
+    list.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  } else {
+    if (q) list = list.filter((n) => [n.name, n.hostname, n.grp, n.os, n.last_ip].some((s) => (s || "").toLowerCase().includes(q)));
+    sortNodes(list);
+  }
 
-  const admin = !isViewer();
+  const activeCols = COLUMN_CATALOG.filter((c) => COLS.includes(c.key));
+
   const tbl = $("#srvTbl");
   tbl.replaceChildren();
   const head = el("tr");
+  if (admin && dragSortOn) head.appendChild(el("th"));
   if (admin) {
     const allCb = el("input"); allCb.type = "checkbox";
     allCb.checked = list.length > 0 && list.every((n) => SELECTED.has(n.id));
@@ -79,7 +155,17 @@ function render() {
     });
     const th0 = el("th"); th0.appendChild(allCb); head.appendChild(th0);
   }
-  SORT_COLS.forEach((c) => {
+  // 名称列固定始终显示
+  if (dragSortOn) {
+    head.appendChild(el("th", "nowrap", "名称"));
+  } else {
+    const arrow = sortKey === "name" ? (sortDir === 1 ? " ▲" : " ▼") : "";
+    const th = el("th", "th-sort", "名称" + arrow);
+    th.addEventListener("click", () => setSort("name"));
+    head.appendChild(th);
+  }
+  activeCols.forEach((c) => {
+    if (dragSortOn) { head.appendChild(el("th", "nowrap", c.label)); return; }
     const arrow = sortKey === c.key ? (sortDir === 1 ? " ▲" : " ▼") : "";
     const th = el("th", "th-sort", c.label + arrow);
     th.addEventListener("click", () => setSort(c.key));
@@ -90,6 +176,27 @@ function render() {
 
   for (const n of list) {
     const tr = el("tr");
+    if (admin && dragSortOn) {
+      tr.draggable = true;
+      tr.dataset.id = String(n.id);
+      tr.addEventListener("dragstart", (e) => { dragFromId = n.id; tr.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+      tr.addEventListener("dragend", () => { tr.classList.remove("dragging"); });
+      tr.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+      tr.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (dragFromId === null || dragFromId === n.id) return;
+        const from = list.findIndex((x) => x.id === dragFromId);
+        const to = list.findIndex((x) => x.id === n.id);
+        if (from < 0 || to < 0) return;
+        const moved = list.splice(from, 1)[0];
+        list.splice(to, 0, moved);
+        list.forEach((x, i) => { x.sort_order = i; });
+        render();
+        saveOrder(list);
+      });
+      const handleTd = el("td", "drag-handle", "⠿");
+      tr.appendChild(handleTd);
+    }
     if (admin) {
       const cbTd = el("td");
       const cb = el("input"); cb.type = "checkbox"; cb.checked = SELECTED.has(n.id);
@@ -97,19 +204,13 @@ function render() {
       cbTd.appendChild(cb); tr.appendChild(cbTd);
     }
 
-    const nameTd = el("td");
+    const nameTd = el("td", "nowrap"); nameTd.title = n.name;
     const link = el("a", null, n.name); link.href = "/nodes/" + n.id; link.style.fontWeight = "600";
     nameTd.appendChild(link); tr.appendChild(nameTd);
-    tr.appendChild(el("td", null, n.grp || "—"));
-    tr.appendChild(el("td", "subtle", n.note || "—"));
-    const stTd = el("td"); stTd.appendChild(statusPill(n)); tr.appendChild(stTd);
-    tr.appendChild(el("td", "subtle", (n.hostname || "—") + (n.os ? " · " + n.os : "")));
-    tr.appendChild(el("td", "subtle", n.agent_version || "—"));
-    tr.appendChild(el("td", "subtle", fmtTrafficCell(n)));
-    tr.appendChild(el("td", "subtle", n.last_seen ? timeAgo(n.last_seen) : "从未"));
+    activeCols.forEach((c) => tr.appendChild(c.render(n)));
 
     if (admin) {
-      const ops = el("td");
+      const ops = el("td", "ops");
       const edit = el("button", "btn ghost xs", "编辑");
       edit.addEventListener("click", () => openEdit(n));
       ops.appendChild(edit);
@@ -133,7 +234,9 @@ function render() {
   }
   if (!list.length) {
     const tr = el("tr"); const td = el("td", "subtle", NODES.length ? "无匹配" : "还没有服务器,点右上角「添加节点」");
-    td.colSpan = admin ? 10 : 8; tr.appendChild(td); tbl.appendChild(tr);
+    let span = 1 /* 名称 */ + activeCols.length;
+    if (admin) span += 1 /* 勾选 */ + 1 /* 操作 */ + (dragSortOn ? 1 : 0);
+    td.colSpan = span; tr.appendChild(td); tbl.appendChild(tr);
   }
   updateBatch();
 }
@@ -141,6 +244,23 @@ function render() {
 function updateBatch() {
   $("#batchbar").classList.toggle("hidden", SELECTED.size === 0);
   $("#selCount").textContent = "已选 " + SELECTED.size;
+}
+
+let saveOrderTimer = null;
+function saveOrder(list) {
+  clearTimeout(saveOrderTimer);
+  saveOrderTimer = setTimeout(async () => {
+    try { await api("POST", "/api/nodes/reorder", { ids: list.map((n) => n.id) }); } catch (e) { alert(e.error || "排序保存失败"); }
+  }, 400);
+}
+function setDragSort(on) {
+  dragSortOn = on;
+  localStorage.setItem("op-srv-dragsort", on ? "1" : "0");
+  $("#dragSortBtn").textContent = "拖拽排序:" + (on ? "开" : "关");
+  $("#dragSortBtn").classList.toggle("primary", on);
+  $("#dragSortBtn").classList.toggle("ghost", !on);
+  $("#search").disabled = on;
+  render();
 }
 
 async function load() {
@@ -157,7 +277,8 @@ async function load() {
 let editingId = null;
 function openEdit(n) {
   editingId = n.id;
-  $("#eName").value = n.name; $("#eGrp").value = n.grp || ""; $("#eNote").value = n.note || "";
+  $("#eName").value = n.name; $("#eNote").value = n.note || "";
+  wireGroupSelect($("#eGrpSel"), $("#eGrpNewRow"), $("#eGrpNew"), n.grp || "");
   $("#eTrafficReset").checked = !!n.traffic_reset_enabled;
   $("#eTrafficDay").value = n.traffic_reset_day || 1;
   $("#eTrafficDayRow").classList.toggle("hidden", !n.traffic_reset_enabled);
@@ -201,6 +322,19 @@ async function batch(action, extra) {
     SELECTED.clear(); await load(); alert("已处理 " + r.affected + " 个节点");
   } catch (e) { alert(e.error || "操作失败"); }
 }
+/* 远程升级:仅在线节点(有活跃 WS 连接)会收到触发,离线节点原样跳过,
+   不代表升级最终成功——agent 侧调用助手失败(如旧版未装 sudoers 规则)不会回传结果。 */
+async function batchUpgrade() {
+  const ids = Array.from(SELECTED);
+  if (!ids.length) return;
+  try {
+    const r = await api("POST", "/api/nodes/batch", { action: "upgrade", ids });
+    SELECTED.clear(); await load();
+    let msg = "已触发 " + r.affected + " 个在线节点升级(实际是否升级成功需稍后在列表核对 Agent 版本)。";
+    if (r.offline && r.offline.length) msg += "\n" + r.offline.length + " 个节点当前离线,未收到触发,需另行手动升级。";
+    alert(msg);
+  } catch (e) { alert(e.error || "操作失败"); }
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   await myRole();
@@ -208,11 +342,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadAlertBadge();
   setInterval(load, 8000);
 
+  setDragSort(dragSortOn);
+  $("#dragSortBtn").addEventListener("click", () => setDragSort(!dragSortOn));
   $("#search").addEventListener("input", render);
+
+  // 自定义列
+  $("#srvColsBtn").addEventListener("click", () => {
+    const list = $("#srvColList");
+    list.replaceChildren();
+    for (const c of COLUMN_CATALOG) {
+      const lab = el("label", "chk");
+      const cb = el("input"); cb.type = "checkbox"; cb.value = c.key; cb.checked = COLS.includes(c.key);
+      lab.appendChild(cb); lab.appendChild(el("span", null, " " + c.label));
+      list.appendChild(lab);
+    }
+    $("#srvColDlg").showModal();
+  });
+  $("#srvColForm").addEventListener("submit", (e) => {
+    if (e.submitter && e.submitter.value !== "ok") return;
+    const chosen = $$("#srvColList input:checked").map((c) => c.value);
+    COLS = chosen.length ? chosen : DEFAULT_COLS.slice();
+    localStorage.setItem("op-srv-cols", JSON.stringify(COLS));
+    render();
+  });
+  $("#srvColReset").addEventListener("click", () => {
+    localStorage.removeItem("op-srv-cols"); COLS = DEFAULT_COLS.slice();
+    $$("#srvColList input").forEach((c) => { c.checked = DEFAULT_COLS.includes(c.value); });
+  });
   $("#selClear").addEventListener("click", () => { SELECTED.clear(); render(); });
   $("#batchDelete").addEventListener("click", () => { if (SELECTED.size && confirm("删除选中 " + SELECTED.size + " 个节点及历史数据?不可恢复。")) batch("delete"); });
   $("#batchRevoke").addEventListener("click", () => { if (SELECTED.size && confirm("吊销选中 " + SELECTED.size + " 个节点的 token?")) batch("revoke"); });
   $("#batchSetGrp").addEventListener("click", () => batch("set_group", { grp: $("#batchGrp").value.trim() }));
+  $("#batchUpgrade").addEventListener("click", () => {
+    if (!SELECTED.size) return;
+    if (!confirm("触发选中 " + SELECTED.size + " 个节点远程升级 agent?仅对当前在线的节点生效,离线节点需另行手动升级。")) return;
+    batchUpgrade();
+  });
 
   // 编辑保存
   $("#eTrafficReset").addEventListener("change", () => {
@@ -223,7 +388,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     try {
       await api("POST", "/api/nodes/" + editingId + "/rename", {
-        name: $("#eName").value.trim(), grp: $("#eGrp").value.trim(), note: $("#eNote").value.trim(),
+        name: $("#eName").value.trim(), grp: groupSelectValue($("#eGrpSel"), $("#eGrpNew")), note: $("#eNote").value.trim(),
         traffic_reset_enabled: $("#eTrafficReset").checked,
         traffic_reset_day: parseInt($("#eTrafficDay").value, 10) || 1,
       });
@@ -238,7 +403,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("#addNodeBtn").addEventListener("click", () => {
     $("#addStep1").classList.remove("hidden"); $("#addStep2").classList.add("hidden");
-    $("#nodeName").value = ""; $("#nodeGrp").value = "";
+    $("#nodeName").value = "";
+    wireGroupSelect($("#nodeGrpSel"), $("#nodeGrpNewRow"), $("#nodeGrpNew"), "");
     $("#nodeTrafficReset").checked = false; $("#nodeTrafficDay").value = 1;
     $("#nodeTrafficDayRow").classList.add("hidden");
     dlg.showModal();
@@ -250,7 +416,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const btn = $("#createBtn"); btn.disabled = true;
     try {
       const r = await api("POST", "/api/nodes", {
-        name: $("#nodeName").value.trim(), grp: $("#nodeGrp").value.trim(),
+        name: $("#nodeName").value.trim(), grp: groupSelectValue($("#nodeGrpSel"), $("#nodeGrpNew")),
         traffic_reset_enabled: $("#nodeTrafficReset").checked,
         traffic_reset_day: parseInt($("#nodeTrafficDay").value, 10) || 1,
       });

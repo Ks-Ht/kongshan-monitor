@@ -72,7 +72,7 @@
       <h3>外观主题</h3>
       <p class="hint subtle">选择配色主题(本地保存,仅影响你自己的浏览器)。</p>
       <div class="theme-swatches" id="themeSwatches"></div>
-      <p class="hint subtle" style="margin-top:14px">明暗模式</p>
+      <p class="hint subtle" style="margin-top:14px">明暗模式(「科技」「终端」「运维深色」为固定深色风格、「水墨浅色」为固定浅色风格,均不受此处设置影响)</p>
       <div class="mode-toggle">
         <button class="btn ghost sm" data-mode="light">浅色</button>
         <button class="btn ghost sm" data-mode="dark">深色</button>
@@ -122,7 +122,7 @@
     <section class="card pad" id="s-sessions">
       <div class="row-head"><h3>登录会话 / 设备</h3></div>
       <p class="hint subtle">当前账号的活跃会话。可撤销可疑设备,或让全部会话失效。</p>
-      <table class="tbl" id="sessTbl"></table>
+      <div class="tbl-wrap"><table class="tbl" id="sessTbl"></table></div>
       <button id="logoutAllBtn" class="btn warn" style="margin-top:12px">使全部会话失效</button>
     </section>
 
@@ -152,7 +152,7 @@
       <div class="row-head"><h3>只读 API Token</h3><button id="addTokenBtn" class="btn primary sm">新建 Token</button></div>
       <p class="hint subtle">用于外部系统只读拉取:Prometheus <code>/metrics</code>、<code>/api/v1/nodes</code>、历史导出。请求头 <code>Authorization: Bearer opk_...</code>。明文仅创建时显示一次。</p>
       <div id="newToken" class="hidden"><p class="hint">已创建,请立即复制保存:</p><pre id="tokenVal" class="cmd"></pre></div>
-      <table class="tbl" id="tokenTbl"></table>
+      <div class="tbl-wrap"><table class="tbl" id="tokenTbl"></table></div>
     </section>
 
     <section class="card pad" id="s-upgrade">
@@ -187,12 +187,12 @@
       <div class="row-head"><h3>账号管理</h3><button id="addUserBtn" class="btn primary sm">新建账号</button></div>
       <p class="hint subtle">轻量 RBAC:<b>admin</b> 可管理全部功能;<b>viewer</b>(只读观察者)仅能查看监控数据,
         无法新增/编辑/删除节点、规则、渠道、设置等。至少保留一个 admin 账号。</p>
-      <table class="tbl" id="userTbl"></table>
+      <div class="tbl-wrap"><table class="tbl" id="userTbl"></table></div>
     </section>
 
     <section class="card pad" id="s-audit">
       <div class="row-head"><h3>审计日志(最近 100 条)</h3><button id="auditExportBtn" class="btn ghost sm">导出 CSV</button></div>
-      <table class="tbl" id="auditTbl"></table>
+      <div class="tbl-wrap"><table class="tbl" id="auditTbl"></table></div>
     </section>
   </div>
  </div>

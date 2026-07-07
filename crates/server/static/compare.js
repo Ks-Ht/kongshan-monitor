@@ -23,7 +23,9 @@ async function loadNodes() {
       redraw();
     });
     lab.appendChild(cb);
-    lab.appendChild(el("span", null, " " + n.name));
+    const nameSpan = el("span", null, " " + n.name);
+    nameSpan.title = n.name;
+    lab.appendChild(nameSpan);
     box.appendChild(lab);
   }
 }

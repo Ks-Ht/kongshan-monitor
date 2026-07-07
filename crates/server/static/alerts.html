@@ -29,7 +29,7 @@
       <h3>当前告警 / 历史事件</h3>
       <span id="firingCount" class="subtle" role="status" aria-live="polite"></span>
     </div>
-    <table class="tbl" id="eventTbl"></table>
+    <div class="tbl-wrap"><table class="tbl" id="eventTbl"></table></div>
   </section>
 
   <section class="card pad">
@@ -37,7 +37,7 @@
       <h3>告警规则</h3>
       <button id="addRuleBtn" class="btn primary sm admin-only">新增规则</button>
     </div>
-    <table class="tbl" id="ruleTbl"></table>
+    <div class="tbl-wrap"><table class="tbl" id="ruleTbl"></table></div>
   </section>
 
   <section class="card pad">
@@ -47,7 +47,7 @@
     </div>
     <p class="hint subtle">支持飞书 / 钉钉 / 企业微信 / Slack 群机器人、Telegram、Bark、邮件(SMTP)。
       出站强制 https / TLS 并做 SSRF 校验:默认拒绝私网/回环目标。</p>
-    <table class="tbl" id="chanTbl"></table>
+    <div class="tbl-wrap"><table class="tbl" id="chanTbl"></table></div>
     <div class="row-head" style="margin-top:16px">
       <label class="hint admin-only" style="display:flex;align-items:center;gap:8px;margin:0">重复提醒:未恢复告警每隔
         <select id="renotifySel" class="tb-sel" style="width:auto">
@@ -71,7 +71,7 @@
       <button id="addSilenceBtn" class="btn primary sm admin-only">新增静默</button>
     </div>
     <p class="hint subtle">静默期内命中的(节点 × 规则)不外发通知,但仍记录事件、在 UI 显示。适合计划维护时段。</p>
-    <table class="tbl" id="silenceTbl"></table>
+    <div class="tbl-wrap"><table class="tbl" id="silenceTbl"></table></div>
   </section>
 </main>
 

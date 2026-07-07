@@ -75,9 +75,9 @@ function fmtBps(n) {
 function fmtDur(secs) {
   if (!Number.isFinite(secs) || secs < 0) return "-";
   const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60);
-  if (d > 0) return d + " 天 " + h + " 时";
-  if (h > 0) return h + " 时 " + m + " 分";
-  return m + " 分";
+  if (d > 0) return d + "天" + h + "时";
+  if (h > 0) return h + "时" + m + "分";
+  return m + "分";
 }
 function fmtTime(ts) {
   if (!ts) return "-";
@@ -120,13 +120,15 @@ function notifyDesktop(text) {
 
 /* ---------- 主题(浅/深 + 配色) ---------- */
 const THEMES = [
-  { id: "green", name: "森林绿", color: "#3e8e7e" },
-  { id: "ocean", name: "海洋蓝", color: "#3b7dd8" },
-  { id: "teal", name: "青碧", color: "#2f9e8f" },
-  { id: "violet", name: "紫罗兰", color: "#7c6bd0" },
-  { id: "amber", name: "暖橙", color: "#c8862a" },
-  { id: "rose", name: "玫瑰", color: "#cc5f7a" },
-  { id: "graphite", name: "石墨", color: "#5f6f7c" },
+  { id: "green", name: "默认", color: "#3e8e7e" },
+  { id: "tech", name: "科技", color: "#35c5e0" },
+  { id: "minimal", name: "极简", color: "#3a3a38" },
+  { id: "soft", name: "柔和", color: "#e08a5c" },
+  { id: "terminal", name: "终端", color: "#3ddc7a" },
+  { id: "apple", name: "苹果", color: "#0071e3" },
+  { id: "panel", name: "面板", color: "#6c5ce7" },
+  { id: "ink-light", name: "水墨浅色", color: "#3f6b57" },
+  { id: "ops-dark", name: "运维深色", color: "#46c08d" },
 ];
 function applyAccent(id) {
   document.documentElement.setAttribute("data-theme", id || "green");

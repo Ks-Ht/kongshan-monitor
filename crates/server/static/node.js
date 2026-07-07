@@ -89,7 +89,7 @@ function renderTables(detail) {
   dt.appendChild(dh);
   for (const d of (detail && detail.disks) || []) {
     const tr = el("tr");
-    tr.appendChild(el("td", null, d.mount));
+    const mountTd = el("td", "nowrap", d.mount); mountTd.title = d.mount; tr.appendChild(mountTd);
     tr.appendChild(el("td", null, d.fs));
     tr.appendChild(el("td", null, fmtBytes(d.used) + " / " + fmtBytes(d.total)));
     tr.appendChild(el("td", null, pct(d.used, d.total).toFixed(0) + "%"));
@@ -104,7 +104,7 @@ function renderTables(detail) {
   nt.appendChild(nh);
   for (const x of (detail && detail.nets) || []) {
     const tr = el("tr");
-    tr.appendChild(el("td", null, x.name));
+    const nicTd = el("td", "nowrap", x.name); nicTd.title = x.name; tr.appendChild(nicTd);
     tr.appendChild(el("td", null, fmtBps(x.rx_bps)));
     tr.appendChild(el("td", null, fmtBps(x.tx_bps)));
     tr.appendChild(el("td", null, fmtBytes(x.rx_bytes) + " / " + fmtBytes(x.tx_bytes)));
@@ -162,9 +162,9 @@ function renderTables(detail) {
     tt.appendChild(tth);
     for (const p of tops) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, p.name));
-      tr.appendChild(el("td", null, (p.cpu_pct || 0).toFixed(1) + "%"));
-      tr.appendChild(el("td", null, fmtBytes(p.rss || 0)));
+      const procNameTd = el("td", "nowrap", p.name); procNameTd.title = p.name; tr.appendChild(procNameTd);
+      tr.appendChild(el("td", "nowrap", (p.cpu_pct || 0).toFixed(1) + "%"));
+      tr.appendChild(el("td", "nowrap", fmtBytes(p.rss || 0)));
       tt.appendChild(tr);
     }
   }
@@ -181,7 +181,7 @@ function renderTables(detail) {
     st.appendChild(sh);
     for (const s of svcs) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, s.name));
+      const svcNameTd = el("td", "nowrap", s.name); svcNameTd.title = s.name; tr.appendChild(svcNameTd);
       const td = el("td");
       td.appendChild(el("span", "spill " + (s.active ? "spill-on" : "spill-off"), s.active ? "运行中" : "未运行"));
       tr.appendChild(td);
@@ -201,13 +201,13 @@ function renderTables(detail) {
     dt.appendChild(dh);
     for (const c of containers) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, c.name));
+      const cNameTd = el("td", "nowrap", c.name); cNameTd.title = c.name; tr.appendChild(cNameTd);
       const td = el("td");
       const running = c.state === "running";
       td.appendChild(el("span", "spill " + (running ? "spill-on" : "spill-off"), c.state));
       tr.appendChild(td);
-      tr.appendChild(el("td", null, (c.cpu_pct || 0).toFixed(1) + "%"));
-      tr.appendChild(el("td", null, c.mem_limit ? (fmtBytes(c.mem_used || 0) + " / " + fmtBytes(c.mem_limit)) : fmtBytes(c.mem_used || 0)));
+      tr.appendChild(el("td", "nowrap", (c.cpu_pct || 0).toFixed(1) + "%"));
+      tr.appendChild(el("td", "nowrap", c.mem_limit ? (fmtBytes(c.mem_used || 0) + " / " + fmtBytes(c.mem_limit)) : fmtBytes(c.mem_used || 0)));
       dt.appendChild(tr);
     }
   }
@@ -224,13 +224,13 @@ function renderTables(detail) {
     pt.appendChild(ph);
     for (const p of watch) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, p.name));
+      const watchNameTd = el("td", "nowrap", p.name); watchNameTd.title = p.name; tr.appendChild(watchNameTd);
       const stTd = el("td");
       stTd.appendChild(el("span", "pill " + (p.running ? "on" : "off"), p.running ? "运行中" : "未运行"));
       tr.appendChild(stTd);
-      tr.appendChild(el("td", null, String(p.count)));
-      tr.appendChild(el("td", null, p.cpu_pct.toFixed(1) + "%"));
-      tr.appendChild(el("td", null, fmtBytes(p.rss)));
+      tr.appendChild(el("td", "nowrap", String(p.count)));
+      tr.appendChild(el("td", "nowrap", p.cpu_pct.toFixed(1) + "%"));
+      tr.appendChild(el("td", "nowrap", fmtBytes(p.rss)));
       pt.appendChild(tr);
     }
   }
@@ -283,9 +283,12 @@ async function loadDetail() {
   const d = await api("GET", "/api/nodes/" + NODE_ID);
   nodeInfo = d.node;
   $("#nodeTitle").textContent = d.node.name;
-  $("#nodeSub").textContent = (d.node.grp ? "[" + d.node.grp + "] " : "") +
+  $("#nodeTitle").title = d.node.name;
+  const subText = (d.node.grp ? "[" + d.node.grp + "] " : "") +
     (d.node.hostname || "") + (d.node.note ? " · " + d.node.note : "") +
     (d.node.revoked && !d.node.registered ? " · token 已吊销" : "");
+  $("#nodeSub").textContent = subText;
+  $("#nodeSub").title = subText;
   document.title = "空山Outpost · " + d.node.name;
   renderStats(d.node, d.latest);
   renderSysInfo(d.node, d.latest);
@@ -369,6 +372,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     try { await navigator.clipboard.writeText($("#newCmd").textContent); } catch (_) {}
   });
   $("#closeCmdDlg").addEventListener("click", () => $("#cmdDlg").close());
+
+  /* 远程升级(单节点):仅当前节点在活跃 WS 连接时才会触发,离线则提示需另行手动升级。
+     复用批量端点(action:"upgrade"),不新增接口。 */
+  $("#upgradeBtn").addEventListener("click", async () => {
+    if (!confirm("触发「" + (nodeInfo ? nodeInfo.name : NODE_ID) + "」远程升级 agent?仅当前在线才会生效。")) return;
+    try {
+      const r = await api("POST", "/api/nodes/batch", { action: "upgrade", ids: [NODE_ID] });
+      if (r.affected > 0) alert("已触发升级,实际是否成功需稍后核对 Agent 版本。");
+      else alert("该节点当前离线,未收到触发,需另行手动升级。");
+    } catch (e) { alert(e.error || "失败"); }
+  });
 
   $("#deleteBtn").addEventListener("click", async () => {
     if (!confirm("确认删除节点及其全部历史数据?此操作不可恢复。")) return;

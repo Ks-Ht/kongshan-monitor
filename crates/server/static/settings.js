@@ -185,13 +185,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     tbl.appendChild(head);
     for (const s of d.items) {
       const tr = el("tr");
-      const ua = el("td");
-      ua.appendChild(el("span", null, (s.user_agent || "未知").slice(0, 60)));
+      const ua = el("td", "nowrap");
+      const uaFull = s.user_agent || "未知";
+      const uaSpan = el("span", null, uaFull.slice(0, 60) + (uaFull.length > 60 ? "…" : ""));
+      uaSpan.title = uaFull;
+      ua.appendChild(uaSpan);
       if (s.current) ua.appendChild(el("span", "pill on", " 当前"));
       tr.appendChild(ua);
-      tr.appendChild(el("td", null, s.ip || "-"));
-      tr.appendChild(el("td", null, fmtTime(s.created_at)));
-      const ops = el("td");
+      tr.appendChild(el("td", "nowrap", s.ip || "-"));
+      tr.appendChild(el("td", "nowrap", fmtTime(s.created_at)));
+      const ops = el("td", "ops");
       if (!s.current) {
         const del = el("button", "btn danger xs", "撤销");
         del.addEventListener("click", async () => {
@@ -257,10 +260,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     tbl.appendChild(head);
     for (const t of d.items) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, t.name));
-      tr.appendChild(el("td", null, fmtTime(t.created_at)));
-      tr.appendChild(el("td", null, t.last_used ? fmtTime(t.last_used) : "从未"));
-      const ops = el("td");
+      const tokNameTd = el("td", "nowrap", t.name); tokNameTd.title = t.name; tr.appendChild(tokNameTd);
+      tr.appendChild(el("td", "nowrap", fmtTime(t.created_at)));
+      tr.appendChild(el("td", "nowrap", t.last_used ? fmtTime(t.last_used) : "从未"));
+      const ops = el("td", "ops");
       const del = el("button", "btn danger xs", "删除");
       del.addEventListener("click", async () => {
         if (!confirm("删除 Token「" + t.name + "」?使用它的外部系统将立即失效。")) return;
@@ -296,12 +299,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       tbl.appendChild(head);
       for (const u of d.items) {
         const tr = el("tr");
-        const nameTd = el("td", null, u.username);
+        const nameTd = el("td", "nowrap", u.username); nameTd.title = u.username;
         if (u.username === me.username) nameTd.appendChild(el("span", "subtle", " (你)"));
         tr.appendChild(nameTd);
-        tr.appendChild(el("td", null, ROLE_LABEL[u.role] || u.role));
-        tr.appendChild(el("td", null, fmtTime(u.created_at)));
-        const ops = el("td");
+        tr.appendChild(el("td", "nowrap", ROLE_LABEL[u.role] || u.role));
+        tr.appendChild(el("td", "nowrap", fmtTime(u.created_at)));
+        const ops = el("td", "ops");
         const other = u.role === "admin" ? "viewer" : "admin";
         const toggle = el("button", "btn ghost xs", "设为 " + other);
         toggle.addEventListener("click", async () => {
@@ -346,11 +349,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     tbl.appendChild(head);
     for (const it of a.items) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, fmtTime(it.ts)));
-      tr.appendChild(el("td", null, it.username || "-"));
-      tr.appendChild(el("td", null, it.ip || "-"));
-      tr.appendChild(el("td", null, it.action));
-      tr.appendChild(el("td", null, it.detail || ""));
+      tr.appendChild(el("td", "nowrap", fmtTime(it.ts)));
+      tr.appendChild(el("td", "nowrap", it.username || "-"));
+      tr.appendChild(el("td", "nowrap", it.ip || "-"));
+      tr.appendChild(el("td", "nowrap", it.action));
+      const detailTd = el("td", "nowrap nowrap-tight", it.detail || ""); if (it.detail) detailTd.title = it.detail; tr.appendChild(detailTd);
       tbl.appendChild(tr);
     }
   } catch (_) {}

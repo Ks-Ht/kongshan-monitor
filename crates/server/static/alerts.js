@@ -31,11 +31,11 @@ async function loadEvents() {
     const dot = el("span", "dot " + (e.firing ? "off" : "on"));
     st.appendChild(dot); st.appendChild(el("span", null, " " + (e.firing ? "告警中" : "已恢复")));
     tr.appendChild(st);
-    tr.appendChild(el("td", null, e.node_name || ("#" + e.node_id)));
-    tr.appendChild(el("td", null, e.rule_name || ("#" + e.rule_id)));
-    tr.appendChild(el("td", null, e.message));
-    tr.appendChild(el("td", null, fmtTime(e.started_at)));
-    tr.appendChild(el("td", null, e.resolved_at ? fmtTime(e.resolved_at) : "—"));
+    const evNodeTd = el("td", "nowrap", e.node_name || ("#" + e.node_id)); if (e.node_name) evNodeTd.title = e.node_name; tr.appendChild(evNodeTd);
+    const evRuleTd = el("td", "nowrap", e.rule_name || ("#" + e.rule_id)); if (e.rule_name) evRuleTd.title = e.rule_name; tr.appendChild(evRuleTd);
+    const msgTd = el("td", "nowrap", e.message); msgTd.title = e.message; tr.appendChild(msgTd);
+    tr.appendChild(el("td", "nowrap", fmtTime(e.started_at)));
+    tr.appendChild(el("td", "nowrap", e.resolved_at ? fmtTime(e.resolved_at) : "—"));
     tbl.appendChild(tr);
   }
   if (!d.items.length) { const tr = el("tr"); const td = el("td", "subtle", "暂无告警事件"); td.colSpan = 6; tr.appendChild(td); tbl.appendChild(tr); }
@@ -58,20 +58,20 @@ async function loadRules(nodes) {
   const head = el("tr"); th(head, ["名称", "级别", "条件", "持续", "范围", "状态"].concat(admin ? ["操作"] : [])); tbl.appendChild(head);
   for (const r of d.items) {
     const tr = el("tr");
-    tr.appendChild(el("td", null, r.name));
+    const ruleNameTd = el("td", "nowrap", r.name); ruleNameTd.title = r.name; tr.appendChild(ruleNameTd);
     const sevTd = el("td"); sevTd.appendChild(sevBadge(r.severity || "warning")); tr.appendChild(sevTd);
     let cond;
     if (r.metric === "offline") cond = "离线";
     else if (r.comparator === "roc") cond = METRIC_LABEL[r.metric] + " 变化 ≥ " + r.threshold + "(" + fmtRocWindow(r.roc_window_secs) + "内)";
     else cond = METRIC_LABEL[r.metric] + " " + (CMP[r.comparator] || ">") + " " + r.threshold;
-    tr.appendChild(el("td", null, cond));
-    tr.appendChild(el("td", null, r.duration_secs + "s"));
-    tr.appendChild(el("td", null, r.node_name || "所有节点"));
+    const condTd = el("td", "nowrap", cond); condTd.title = cond; tr.appendChild(condTd);
+    tr.appendChild(el("td", "nowrap", r.duration_secs + "s"));
+    const scopeTd = el("td", "nowrap", r.node_name || "所有节点"); if (r.node_name) scopeTd.title = r.node_name; tr.appendChild(scopeTd);
     const stTd = el("td");
     stTd.appendChild(el("span", "pill " + (r.enabled ? "on" : "off"), r.enabled ? "启用" : "停用"));
     tr.appendChild(stTd);
     if (admin) {
-      const ops = el("td");
+      const ops = el("td", "ops");
       const tog = el("button", "btn ghost xs", r.enabled ? "停用" : "启用");
       tog.addEventListener("click", async () => { await api("POST", "/api/alerts/rules/" + r.id + "/toggle"); loadRules(nodes); });
       const del = el("button", "btn danger xs", "删除");
@@ -94,12 +94,12 @@ async function loadChannels() {
   const head = el("tr"); th(head, ["名称", "类型", "地址", "接收级别"].concat(admin ? ["操作"] : [])); tbl.appendChild(head);
   for (const c of d.items) {
     const tr = el("tr");
-    tr.appendChild(el("td", null, c.name));
-    tr.appendChild(el("td", null, c.kind));
-    tr.appendChild(el("td", null, c.url));
-    tr.appendChild(el("td", null, "≥ " + (SEV_LABEL[c.min_severity] || c.min_severity || "信息")));
+    const chanNameTd = el("td", "nowrap", c.name); chanNameTd.title = c.name; tr.appendChild(chanNameTd);
+    tr.appendChild(el("td", "nowrap", c.kind));
+    const urlTd = el("td", "nowrap nowrap-tight", c.url); urlTd.title = c.url; tr.appendChild(urlTd);
+    tr.appendChild(el("td", "nowrap", "≥ " + (SEV_LABEL[c.min_severity] || c.min_severity || "信息")));
     if (admin) {
-      const ops = el("td");
+      const ops = el("td", "ops");
       const test = el("button", "btn ghost xs", "测试");
       test.addEventListener("click", async () => {
         test.disabled = true; test.textContent = "发送中…";
@@ -127,13 +127,15 @@ async function loadSilences() {
   const head = el("tr"); th(head, ["状态", "节点", "规则", "原因", "结束于"].concat(admin ? ["操作"] : [])); tbl.appendChild(head);
   for (const s of d.items) {
     const tr = el("tr");
-    tr.appendChild(el("td", null, s.active ? "生效中" : "未开始"));
-    tr.appendChild(el("td", null, s.node_id ? (s.node_name || ("#" + s.node_id)) : "所有节点"));
-    tr.appendChild(el("td", null, s.rule_id ? (s.rule_name || ("#" + s.rule_id)) : "所有规则"));
-    tr.appendChild(el("td", null, s.reason || "—"));
-    tr.appendChild(el("td", null, fmtTime(s.end_ts)));
+    tr.appendChild(el("td", "nowrap", s.active ? "生效中" : "未开始"));
+    const silNodeTxt = s.node_id ? (s.node_name || ("#" + s.node_id)) : "所有节点";
+    const silNodeTd = el("td", "nowrap", silNodeTxt); silNodeTd.title = silNodeTxt; tr.appendChild(silNodeTd);
+    const silRuleTxt = s.rule_id ? (s.rule_name || ("#" + s.rule_id)) : "所有规则";
+    const silRuleTd = el("td", "nowrap", silRuleTxt); silRuleTd.title = silRuleTxt; tr.appendChild(silRuleTd);
+    const reasonTd = el("td", "nowrap", s.reason || "—"); if (s.reason) reasonTd.title = s.reason; tr.appendChild(reasonTd);
+    tr.appendChild(el("td", "nowrap", fmtTime(s.end_ts)));
     if (admin) {
-      const ops = el("td");
+      const ops = el("td", "ops");
       const del = el("button", "btn danger xs", "结束");
       del.addEventListener("click", async () => { await api("DELETE", "/api/alerts/silences/" + s.id); loadSilences(); });
       ops.appendChild(del); tr.appendChild(ops);

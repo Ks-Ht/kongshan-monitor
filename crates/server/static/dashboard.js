@@ -5,6 +5,7 @@
 let NODES = new Map();
 let INTERVAL = 5;
 let EXPECTED_AGENT = "";
+let VIEW = localStorage.getItem("op-view") === "list" ? "list" : "grid";
 
 const CARD_MODULES = [
   { id: "cpu", name: "CPU", kind: "meter" },
@@ -52,8 +53,18 @@ function moduleNode(id, n, m, online) {
     case "mem": return meterEl("内存", m.mem_used, m.mem_total, fmtBytes);
     case "disk": return meterEl("磁盘", m.disk_used, m.disk_total, fmtBytes);
     case "swap": return meterEl("Swap", m.swap_used, m.swap_total, fmtBytes);
-    case "net": return el("span", null, "↓ " + fmtBps(m.net_rx_bps) + "  ↑ " + fmtBps(m.net_tx_bps));
-    case "io": return el("span", null, "读 " + fmtBps(m.disk_read_bps) + "  写 " + fmtBps(m.disk_write_bps));
+    case "net": {
+      const box = el("div", "nc-duplex");
+      box.appendChild(el("span", null, "↓ " + fmtBps(m.net_rx_bps)));
+      box.appendChild(el("span", null, "↑ " + fmtBps(m.net_tx_bps)));
+      return box;
+    }
+    case "io": {
+      const box = el("div", "nc-duplex");
+      box.appendChild(el("span", null, "读 " + fmtBps(m.disk_read_bps)));
+      box.appendChild(el("span", null, "写 " + fmtBps(m.disk_write_bps)));
+      return box;
+    }
     case "load": return el("span", null, "负载 " + m.load1.toFixed(2));
     case "procs": return el("span", null, "进程 " + m.procs);
     case "uptime": return el("span", null, online ? "运行 " + fmtDur(m.uptime_secs) : timeAgo(n.last_seen));
@@ -71,16 +82,24 @@ function renderCard(n) {
   const dot = el("span", "dot " + (n.registered ? (online ? "on" : "off") : "pending"));
   dot.title = n.registered ? (online ? "在线" : "离线") : "待注册";
   head.appendChild(dot);
-  head.appendChild(el("span", "nc-name", n.name));
+  const nameEl = el("span", "nc-name", n.name);
+  nameEl.title = n.name;
+  head.appendChild(nameEl);
   if (n.alerting) head.appendChild(el("span", "nc-alert", "告警"));
   if (n.grp) head.appendChild(el("span", "nc-grp", n.grp));
   a.appendChild(head);
 
-  const osLine = el("div", "nc-os", (n.os || "待接入") + (n.arch ? " · " + n.arch : ""));
-  if (n.registered && n.agent_version && EXPECTED_AGENT && n.agent_version !== EXPECTED_AGENT) {
-    osLine.appendChild(el("span", "nc-drift", " agent " + n.agent_version + " ↑" + EXPECTED_AGENT));
-  }
+  const osText = (n.os || "待接入") + (n.arch ? " · " + n.arch : "");
+  const osLine = el("div", "nc-os", osText);
+  osLine.title = osText;
   a.appendChild(osLine);
+
+  if (n.registered && n.agent_version && EXPECTED_AGENT && n.agent_version !== EXPECTED_AGENT) {
+    const driftText = "agent " + n.agent_version + " → 可升级至 " + EXPECTED_AGENT;
+    const driftLine = el("div", "nc-drift", driftText);
+    driftLine.title = driftText;
+    a.appendChild(driftLine);
+  }
 
   const m = n.latest;
   if (m) {
@@ -153,10 +172,17 @@ function renderGroupFilter() {
 function renderAll() {
   renderSummary();
   const grid = $("#grid");
+  grid.classList.toggle("list-view", VIEW === "list");
   grid.replaceChildren();
   const list = filteredSorted();
   $("#empty").classList.toggle("hidden", NODES.size > 0);
   for (const n of list) grid.appendChild(renderCard(n));
+}
+function setView(v) {
+  VIEW = v === "list" ? "list" : "grid";
+  localStorage.setItem("op-view", VIEW);
+  $$("#viewToggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === VIEW));
+  renderAll();
 }
 function patchNode(id) {
   const n = NODES.get(id);
@@ -219,6 +245,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#groupFilter").addEventListener("change", renderAll);
   $("#sortBy").addEventListener("change", renderAll);
   $("#trendRange").addEventListener("change", loadTrend);
+
+  // 卡片网格 / 紧凑列表 视图切换
+  $$("#viewToggle button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === VIEW);
+    b.addEventListener("click", () => setView(b.dataset.view));
+  });
 
   // 卡片自定义
   $("#customBtn").addEventListener("click", () => {

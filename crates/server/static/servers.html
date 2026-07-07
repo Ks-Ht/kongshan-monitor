@@ -28,19 +28,22 @@
   <section class="card pad">
     <div class="row-head">
       <h3>服务器管理</h3>
-      <input id="search" type="search" aria-label="搜索" placeholder="搜索名称 / 主机名 / 分组…" class="tb-search" style="max-width:280px">
+      <input id="search" type="search" aria-label="搜索" placeholder="搜索名称 / 主机名 / 分组 / IP…" class="tb-search" style="max-width:280px">
+      <button id="srvColsBtn" class="btn ghost sm">自定义列</button>
+      <button id="dragSortBtn" class="btn ghost sm admin-only" title="开启后可拖拽行调整顺序">拖拽排序:关</button>
     </div>
 
     <div class="batchbar hidden admin-only" id="batchbar">
       <span id="selCount">已选 0</span>
       <input id="batchGrp" type="text" maxlength="32" placeholder="改分组为…" class="tb-sel" style="width:150px">
       <button id="batchSetGrp" class="btn ghost sm">应用分组</button>
+      <button id="batchUpgrade" class="btn ghost sm" title="仅对当前在线的节点生效">升级 agent</button>
       <button id="batchRevoke" class="btn warn sm">批量吊销</button>
       <button id="batchDelete" class="btn danger sm">批量删除</button>
       <button id="selClear" class="btn ghost sm">取消选择</button>
     </div>
 
-    <table class="tbl" id="srvTbl"></table>
+    <div class="tbl-wrap"><table class="tbl" id="srvTbl"></table></div>
   </section>
 </main>
 
@@ -49,7 +52,8 @@
     <h3>添加节点</h3>
     <div id="addStep1">
       <label>节点名称 <input id="nodeName" type="text" maxlength="64" required placeholder="例如:web-1"></label>
-      <label>分组(可选) <input id="nodeGrp" type="text" maxlength="32" placeholder="例如:生产"></label>
+      <label>分组(可选) <select id="nodeGrpSel"></select></label>
+      <label id="nodeGrpNewRow" class="hidden">新分组名称 <input id="nodeGrpNew" type="text" maxlength="32" placeholder="例如:生产"></label>
       <label><input id="nodeTrafficReset" type="checkbox" style="width:auto;display:inline;vertical-align:middle;margin-right:6px"> 流量统计按月清零</label>
       <label id="nodeTrafficDayRow" class="hidden">每月第几天清零
         <input id="nodeTrafficDay" type="number" min="1" max="28" value="1">
@@ -74,7 +78,8 @@
   <form method="dialog" class="dlg-body" id="editForm">
     <h3>编辑节点</h3>
     <label>名称 <input id="eName" type="text" maxlength="64" required></label>
-    <label>分组 <input id="eGrp" type="text" maxlength="32"></label>
+    <label>分组 <select id="eGrpSel"></select></label>
+    <label id="eGrpNewRow" class="hidden">新分组名称 <input id="eGrpNew" type="text" maxlength="32" placeholder="例如:生产"></label>
     <label>备注 <input id="eNote" type="text" maxlength="200"></label>
     <label><input id="eTrafficReset" type="checkbox" style="width:auto;display:inline;vertical-align:middle;margin-right:6px"> 流量统计按月清零</label>
     <label id="eTrafficDayRow" class="hidden">每月第几天清零
@@ -99,6 +104,18 @@
       <button id="closeCmdDlg" type="button" class="btn ghost">完成</button>
     </div>
   </div>
+</dialog>
+
+<dialog id="srvColDlg" class="dlg">
+  <form method="dialog" class="dlg-body" id="srvColForm">
+    <h3>自定义列</h3>
+    <p class="hint subtle">勾选表格要显示的列(名称列始终显示;本地保存,仅影响你自己的浏览器)。</p>
+    <div id="srvColList" class="chk-grid"></div>
+    <div class="dlg-actions">
+      <button id="srvColReset" type="button" class="btn ghost">恢复默认</button>
+      <button value="ok" class="btn primary" type="submit">完成</button>
+    </div>
+  </form>
 </dialog>
 
 <script src="/static/app.js?v=__V__"></script>
