@@ -4,6 +4,7 @@
 use crate::state::AppState;
 use crate::util::unix_now;
 use sqlx::SqlitePool;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 /// 重滚窗口:每次多回滚最近 N 小时,以纳入乱序/断线补传的迟到点(INSERT OR REPLACE 幂等)。
@@ -100,6 +101,10 @@ async fn auto_backup(st: &AppState) {
     let q = format!("VACUUM INTO '{}'", target_str.replace('\'', "''"));
     match sqlx::query(&q).execute(&st.db).await {
         Ok(_) => {
+            // 备份内含密码哈希/API Token 等敏感数据,显式收紧权限,不依赖 umask 副作用。
+            if let Err(e) = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)) {
+                tracing::error!(error = %e, path = target_str, "备份文件权限设置失败");
+            }
             let _ = crate::db::set_setting(&st.db, "auto_backup_last", &now.to_string()).await;
             tracing::info!(path = target_str, "自动备份完成");
             rotate_backups(&bdir, keep);
