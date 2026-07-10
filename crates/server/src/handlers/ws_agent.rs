@@ -251,7 +251,9 @@ async fn handle_msg(st: &AppState, node_id: i64, m: AgentToServer) -> Result<(),
         AgentToServer::Metrics { mut metrics } => {
             // 时钟偏移检查(规范 6.3.6):异常时间戳直接拒绝该条
             let skew = st.cfg.metrics.ts_skew_secs;
-            if (metrics.ts - now).abs() > skew {
+            // metrics.ts 来自 JSON 的任意 i64(agent 可被攻破,规范 6.2.5),裸减法+abs 在
+            // 极端值(如 i64::MIN)下会回绕/在 debug 下 panic;用 saturating 稳妥拒绝。
+            if metrics.ts.saturating_sub(now).saturating_abs() > skew {
                 tracing::warn!(node_id, agent_ts = metrics.ts, server_ts = now, "时间戳异常,丢弃");
                 return Ok(());
             }
@@ -299,8 +301,10 @@ async fn handle_msg(st: &AppState, node_id: i64, m: AgentToServer) -> Result<(),
             let uptime = i64::try_from(metrics.uptime_secs).unwrap_or(i64::MAX);
             let procs = i64::from(metrics.procs);
 
+            // OR IGNORE + UNIQUE(node_id,ts):server 秒粒度下同一秒到达的两条上报只留一条,
+            // 避免重复行影响 rollup 的 COUNT/AVG 与图表重叠点(见迁移 0013)。
             let ins = sqlx::query!(
-                "INSERT INTO metrics(node_id, ts, cpu_pct, load1, load5, load15,
+                "INSERT OR IGNORE INTO metrics(node_id, ts, cpu_pct, load1, load5, load15,
                         mem_total, mem_used, mem_available, swap_total, swap_used,
                         disk_total, disk_used, disk_read_bps, disk_write_bps,
                         net_rx_bps, net_tx_bps, uptime_secs, procs, detail)

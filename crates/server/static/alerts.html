@@ -28,8 +28,10 @@
     <div class="row-head">
       <h3>当前告警 / 历史事件</h3>
       <span id="firingCount" class="subtle" role="status" aria-live="polite"></span>
+      <button type="button" id="clearEventsBtn" class="btn ghost sm" style="margin-left:auto">清理已恢复</button>
     </div>
     <div class="tbl-wrap"><table class="tbl" id="eventTbl"></table></div>
+    <div id="eventPager" class="pager" role="navigation" aria-label="告警事件翻页"></div>
   </section>
 
   <section class="card pad">

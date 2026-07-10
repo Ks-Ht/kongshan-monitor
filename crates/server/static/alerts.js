@@ -20,8 +20,9 @@ const SEV_CLASS = { info: "sev-info", warning: "sev-warn", critical: "sev-crit" 
 function th(row, labels) { labels.forEach((l) => row.appendChild(el("th", null, l))); }
 function sevBadge(s) { return el("span", "spill " + (SEV_CLASS[s] || "sev-warn"), SEV_LABEL[s] || s); }
 
+let EV_PAGE = 0;
 async function loadEvents() {
-  const d = await api("GET", "/api/alerts/events");
+  const d = await api("GET", "/api/alerts/events?page=" + EV_PAGE);
   const tbl = $("#eventTbl");
   tbl.replaceChildren();
   const head = el("tr"); th(head, ["状态", "节点", "规则", "详情", "开始", "恢复"]); tbl.appendChild(head);
@@ -41,6 +42,23 @@ async function loadEvents() {
   if (!d.items.length) { const tr = el("tr"); const td = el("td", "subtle", "暂无告警事件"); td.colSpan = 6; tr.appendChild(td); tbl.appendChild(tr); }
   $("#firingCount").textContent = d.firing > 0 ? ("🔴 " + d.firing + " 条告警中") : "✓ 一切正常";
   updateBadge(d.firing);
+  renderEventPager(d);
+}
+
+function renderEventPager(d) {
+  const pager = $("#eventPager");
+  if (!pager) return;
+  pager.replaceChildren();
+  const size = d.page_size || 50;
+  const pages = Math.max(1, Math.ceil((d.total || 0) / size));
+  const cur = d.page || 0;
+  const prev = el("button", "btn ghost sm", "‹ 上一页"); prev.type = "button"; prev.disabled = cur <= 0;
+  prev.addEventListener("click", () => { EV_PAGE = Math.max(0, EV_PAGE - 1); loadEvents().catch(() => {}); });
+  const next = el("button", "btn ghost sm", "下一页 ›"); next.type = "button"; next.disabled = cur >= pages - 1;
+  next.addEventListener("click", () => { EV_PAGE += 1; loadEvents().catch(() => {}); });
+  pager.appendChild(prev);
+  pager.appendChild(el("span", "subtle", "第 " + (cur + 1) + " / " + pages + " 页 · 共 " + (d.total || 0) + " 条"));
+  pager.appendChild(next);
 }
 
 function updateBadge(n) {
@@ -163,7 +181,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     fillNodeSelect($("#sNode"), nodes);
   } catch (_) {}
 
-  await Promise.all([loadEvents(), loadRules(nodes), loadChannels(), loadSilences()]);
+  // allSettled 而非 all:任一接口失败也不中断后续事件绑定(否则整页交互瘫痪,需手动刷新)。
+  await Promise.allSettled([loadEvents(), loadRules(nodes), loadChannels(), loadSilences()]);
+
+  $("#clearEventsBtn").addEventListener("click", async () => {
+    if (!confirm("清理全部「已恢复」的历史告警事件?仍在触发中的会保留。")) return;
+    try { await api("POST", "/api/alerts/events/clear"); EV_PAGE = 0; await loadEvents(); }
+    catch (e) { alert(e.error || "清理失败"); }
+  });
 
   // 重复提醒设置
   try {

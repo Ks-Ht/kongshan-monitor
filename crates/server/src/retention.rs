@@ -21,28 +21,61 @@ pub async fn run(st: AppState) {
 
         let days = crate::db::setting_i64(&st.db, "retention_days", 30, 1, 3650).await;
         let cutoff = unix_now().saturating_sub(days.saturating_mul(86400));
-        match sqlx::query!("DELETE FROM metrics WHERE ts < ?1", cutoff).execute(&st.db).await {
-            Ok(r) if r.rows_affected() > 0 => {
-                tracing::info!(deleted = r.rows_affected(), days, "过期指标已清理");
-            }
-            Ok(_) => {}
-            Err(e) => tracing::error!(error = %e, "指标清理失败"),
-        }
-
-        // detail JSON(容器/每核 CPU/进程明细)体积大、历史价值低:比原始点更早
-        // 清空为 '{}',只保留核心数值列供长期图表,压缩历史行体积(配合末尾的
-        // incremental_vacuum 回收空间)。默认 7 天,可经 settings 键 detail_retention_days 调整。
-        let ddays = crate::db::setting_i64(&st.db, "detail_retention_days", 7, 1, 3650).await;
-        let dcut = unix_now().saturating_sub(ddays.saturating_mul(86400));
-        match sqlx::query!("UPDATE metrics SET detail = '{}' WHERE ts < ?1 AND detail <> '{}'", dcut)
+        // 分批删除(每批 5000 行,各自一小事务),批间 sleep 让出 SQLite 唯一写锁,
+        // 避免一次性全表 DELETE 的长写事务把 agent 上报写入饿死(3-5s 写卡顿的元凶)。
+        // 子查询按 ts 走 idx_metrics_ts(见迁移 0013),不再全表扫。
+        let mut deleted = 0u64;
+        loop {
+            match sqlx::query!(
+                "DELETE FROM metrics WHERE id IN (SELECT id FROM metrics WHERE ts < ?1 LIMIT 5000)",
+                cutoff
+            )
             .execute(&st.db)
             .await
-        {
-            Ok(r) if r.rows_affected() > 0 => {
-                tracing::info!(cleared = r.rows_affected(), days = ddays, "过期 detail 明细已清空");
+            {
+                Ok(r) if r.rows_affected() > 0 => {
+                    deleted = deleted.saturating_add(r.rows_affected());
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Ok(_) => break,
+                Err(e) => {
+                    tracing::error!(error = %e, "指标清理失败");
+                    break;
+                }
             }
-            Ok(_) => {}
-            Err(e) => tracing::error!(error = %e, "detail 清空失败"),
+        }
+        if deleted > 0 {
+            tracing::info!(deleted, days, "过期指标已清理");
+        }
+
+        // detail JSON(容器/每核 CPU/进程明细)体积大、历史价值低:比原始点更早清空为
+        // '{}',只保留核心数值列供长期图表(配合末尾 incremental_vacuum 回收)。默认 7 天。
+        // detail 是大 TEXT 列,逐行重写代价高,同样分批,避免长写事务占锁。
+        let ddays = crate::db::setting_i64(&st.db, "detail_retention_days", 7, 1, 3650).await;
+        let dcut = unix_now().saturating_sub(ddays.saturating_mul(86400));
+        let mut cleared = 0u64;
+        loop {
+            match sqlx::query!(
+                "UPDATE metrics SET detail = '{}' WHERE id IN
+                    (SELECT id FROM metrics WHERE ts < ?1 AND detail <> '{}' LIMIT 5000)",
+                dcut
+            )
+            .execute(&st.db)
+            .await
+            {
+                Ok(r) if r.rows_affected() > 0 => {
+                    cleared = cleared.saturating_add(r.rows_affected());
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Ok(_) => break,
+                Err(e) => {
+                    tracing::error!(error = %e, "detail 清空失败");
+                    break;
+                }
+            }
+        }
+        if cleared > 0 {
+            tracing::info!(cleared, days = ddays, "过期 detail 明细已清空");
         }
 
         // 聚合表保留更久(默认 365 天),原始点删除后仍可看低分辨率长历史

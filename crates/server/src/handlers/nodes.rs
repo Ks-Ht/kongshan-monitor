@@ -199,22 +199,29 @@ async fn node_summary(st: &AppState, interval: i64) -> Result<Vec<Value>, AppErr
     .fetch_all(&st.db)
     .await?;
 
+    // 单条查询取每个节点的最新指标(按 ts),避免此前"每节点一次串行 await"的 N+1。
+    // JOIN 子查询按 node_id GROUP BY 取 MAX(ts);配合 UNIQUE(node_id,ts) 保证每节点一行。
+    let latest_rows = sqlx::query!(
+        r#"SELECT m.node_id as "node_id!: i64", m.ts as "ts!", m.cpu_pct as "cpu_pct!: f64",
+                  m.load1 as "load1!: f64", m.load5 as "load5!: f64", m.load15 as "load15!: f64",
+                  m.mem_total as "mem_total!: i64", m.mem_used as "mem_used!: i64",
+                  m.swap_total as "swap_total!: i64", m.swap_used as "swap_used!: i64",
+                  m.disk_total as "disk_total!: i64", m.disk_used as "disk_used!: i64",
+                  m.net_rx_bps as "net_rx_bps!: i64", m.net_tx_bps as "net_tx_bps!: i64",
+                  m.disk_read_bps as "disk_read_bps!: i64", m.disk_write_bps as "disk_write_bps!: i64",
+                  m.uptime_secs as "uptime_secs!: i64", m.procs as "procs!: i64"
+           FROM metrics m
+           JOIN (SELECT node_id, MAX(ts) AS mts FROM metrics GROUP BY node_id) t
+             ON t.node_id = m.node_id AND t.mts = m.ts"#
+    )
+    .fetch_all(&st.db)
+    .await?;
+    let latest_by_node: std::collections::HashMap<i64, _> =
+        latest_rows.into_iter().map(|m| (m.node_id, m)).collect();
+
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-        let latest = sqlx::query!(
-            r#"SELECT ts as "ts!", cpu_pct as "cpu_pct!: f64", load1 as "load1!: f64",
-                      load5 as "load5!: f64", load15 as "load15!: f64",
-                      mem_total as "mem_total!: i64", mem_used as "mem_used!: i64",
-                      swap_total as "swap_total!: i64", swap_used as "swap_used!: i64",
-                      disk_total as "disk_total!: i64", disk_used as "disk_used!: i64",
-                      net_rx_bps as "net_rx_bps!: i64", net_tx_bps as "net_tx_bps!: i64",
-                      disk_read_bps as "disk_read_bps!: i64", disk_write_bps as "disk_write_bps!: i64",
-                      uptime_secs as "uptime_secs!: i64", procs as "procs!: i64"
-               FROM metrics WHERE node_id = ?1 ORDER BY ts DESC LIMIT 1"#,
-            r.id
-        )
-        .fetch_optional(&st.db)
-        .await?;
+        let latest = latest_by_node.get(&r.id);
 
         let online = r
             .last_seen

@@ -26,7 +26,7 @@ case "$SERVER" in https://*) ;; *) echo "错误: --server 必须是 https://" >&
 command -v curl >/dev/null 2>&1 || { echo "需要 curl" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "需要 sha256sum" >&2; exit 1; }
 
-CURL="curl -fsS --proto =https --max-time 120"
+CURL="curl -fsS --proto =https --max-time 120 --retry 3 --retry-delay 2 --retry-connrefused"
 [ -n "$CA" ] && CURL="$CURL --cacert $CA"
 
 case "$(uname -m)" in
@@ -100,7 +100,7 @@ CFG=/etc/outpost-agent/config.toml
 SERVER="$(sed -n 's/^server *= *"\(.*\)"/\1/p' "$CFG" | head -n1)"
 CA="$(sed -n 's/^ca_file *= *"\(.*\)"/\1/p' "$CFG" | head -n1)"
 [ -n "$SERVER" ] || { echo "配置中未找到 server" >&2; exit 1; }
-CURL="curl -fsS --proto =https --max-time 120"
+CURL="curl -fsS --proto =https --max-time 120 --retry 3 --retry-delay 2 --retry-connrefused"
 [ -n "$CA" ] && [ -f "$CA" ] && CURL="$CURL --cacert $CA"
 case "$(uname -m)" in
   x86_64)  TARGET="x86_64-unknown-linux-musl" ;;

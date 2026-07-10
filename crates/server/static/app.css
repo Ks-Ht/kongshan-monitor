@@ -740,3 +740,8 @@ html[data-theme="ink-light"] .brand-dot, html[data-theme="ops-dark"] .brand-dot 
   border-radius: 0; background: var(--accent); box-shadow: none;
   clip-path: polygon(0% 100%, 20% 55%, 35% 75%, 50% 25%, 65% 60%, 80% 40%, 100% 100%);
 }
+
+/* 告警事件翻页条 */
+.pager { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 12px; }
+.pager .btn:disabled { opacity: 0.45; cursor: default; }
+.pager .btn:disabled:hover { border-color: var(--line); }

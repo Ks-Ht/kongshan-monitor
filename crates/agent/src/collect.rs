@@ -95,8 +95,14 @@ impl Sampler {
             .output();
         let states: Vec<String> = match &output {
             Ok(o) => String::from_utf8_lossy(&o.stdout).lines().map(str::trim).map(str::to_string).collect(),
-            Err(_) => Vec::new(), // systemctl 不可用:按未知(非 active)上报
+            // systemctl 整体不可用(容器 / 无 systemd / 无权限):降级为空列表,不逐个
+            // 虚报"服务 down"——否则 services_down 会等于受监控服务总数,稳定误报。
+            Err(_) => return Vec::new(),
         };
+        // 输出行数与服务数不符(异常/截断)同样视为不可信,不虚报
+        if states.len() < self.watch_services.len() {
+            return Vec::new();
+        }
         self.watch_services
             .iter()
             .enumerate()
@@ -124,7 +130,7 @@ impl Sampler {
             procs.push(TopProc {
                 name: comm,
                 cpu_pct: proc_cpu_pct(jiffies.saturating_sub(prev_j), cpu_total_delta),
-                rss: rss_pages.saturating_mul(PAGE_SIZE),
+                rss: rss_pages.saturating_mul(page_size()),
             });
         }
         procs.sort_by(|a, b| {
@@ -315,7 +321,7 @@ impl Sampler {
             let Some(slot) = agg.get_mut(&comm) else { continue };
             if let Some((jiffies, rss_pages)) = parse_pid_stat(&stat) {
                 slot.jiffies = slot.jiffies.saturating_add(jiffies);
-                slot.rss = slot.rss.saturating_add(rss_pages.saturating_mul(PAGE_SIZE));
+                slot.rss = slot.rss.saturating_add(rss_pages.saturating_mul(page_size()));
                 slot.count = slot.count.saturating_add(1);
             }
         }
@@ -340,13 +346,18 @@ fn proc_cpu_pct(proc_delta: u64, total_delta: u64) -> f64 {
     pct.clamp(0.0, 100.0)
 }
 
-/// 页大小(字节)。sysconf 不便,常见 4KiB;仅用于 RSS 估算。
-const PAGE_SIZE: u64 = 4096;
+/// 页大小(字节):启动时经 rustix 取内核真实值并缓存。此前硬编码 4KiB,在 64KiB
+/// 页的内核(部分 aarch64 服务器/云实例)上会把进程 RSS 算小 16 倍;取失败回退 4096。
+fn page_size() -> u64 {
+    use std::sync::OnceLock;
+    static PS: OnceLock<u64> = OnceLock::new();
+    *PS.get_or_init(|| u64::try_from(rustix::param::page_size()).unwrap_or(4096))
+}
 
 /// 读取 CPU 温度:扫描 thermal_zone*,优先 cpu/pkg/core 类型,否则取首个有效值。
 fn read_cpu_temp() -> Option<f64> {
     let mut fallback = None;
-    for i in 0..16 {
+    for i in 0..64 {
         let Some(temp) = read_file(&format!("/sys/class/thermal/thermal_zone{i}/temp")) else {
             continue;
         };

@@ -279,7 +279,21 @@ pub async fn delete_rule(
 }
 
 /// GET /api/alerts/events — 当前 firing + 最近历史。
-pub async fn list_events(State(st): State<AppState>, _u: SessionUser) -> Result<Json<Value>, AppError> {
+/// 告警事件分页参数(每页固定 50 条,page 从 0 起)。
+#[derive(serde::Deserialize)]
+pub struct EventsQuery {
+    #[serde(default)]
+    pub page: i64,
+}
+
+pub async fn list_events(
+    State(st): State<AppState>,
+    _u: SessionUser,
+    axum::extract::Query(q): axum::extract::Query<EventsQuery>,
+) -> Result<Json<Value>, AppError> {
+    const PAGE_SIZE: i64 = 50;
+    let page = q.page.max(0);
+    let offset = page.saturating_mul(PAGE_SIZE);
     let rows = sqlx::query!(
         r#"SELECT e.id as "id!", e.rule_id as "rule_id!", e.node_id as "node_id!",
                   e.state as "state!", e.value as "value!: f64", e.started_at as "started_at!",
@@ -289,7 +303,9 @@ pub async fn list_events(State(st): State<AppState>, _u: SessionUser) -> Result<
            LEFT JOIN nodes n ON n.id = e.node_id
            LEFT JOIN alert_rules r ON r.id = e.rule_id
            ORDER BY (e.resolved_at IS NULL) DESC, e.started_at DESC
-           LIMIT 100"#
+           LIMIT ?1 OFFSET ?2"#,
+        PAGE_SIZE,
+        offset
     )
     .fetch_all(&st.db)
     .await?;
@@ -307,7 +323,20 @@ pub async fn list_events(State(st): State<AppState>, _u: SessionUser) -> Result<
     let firing = sqlx::query_scalar!(r#"SELECT COUNT(*) as "c!: i64" FROM alert_events WHERE resolved_at IS NULL"#)
         .fetch_one(&st.db)
         .await?;
-    Ok(Json(json!({ "items": items, "firing": firing })))
+    let total = sqlx::query_scalar!(r#"SELECT COUNT(*) as "c!: i64" FROM alert_events"#)
+        .fetch_one(&st.db)
+        .await?;
+    Ok(Json(json!({
+        "items": items, "firing": firing, "total": total, "page": page, "page_size": PAGE_SIZE
+    })))
+}
+
+/// POST /api/alerts/events/clear —— 清理全部"已恢复"的历史告警事件(仍触发中的保留)。
+pub async fn clear_events(State(st): State<AppState>, _u: SessionAdmin) -> Result<Json<Value>, AppError> {
+    let r = sqlx::query!("DELETE FROM alert_events WHERE resolved_at IS NOT NULL")
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({ "deleted": r.rows_affected() })))
 }
 
 /// GET /api/alerts/channels

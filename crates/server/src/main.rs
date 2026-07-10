@@ -198,6 +198,7 @@ fn build_router(st: AppState) -> Router {
         .route("/api/alerts/rules/{id}", axum::routing::delete(handlers::alerts::delete_rule))
         .route("/api/alerts/rules/{id}/toggle", post(handlers::alerts::toggle_rule))
         .route("/api/alerts/events", get(handlers::alerts::list_events))
+        .route("/api/alerts/events/clear", post(handlers::alerts::clear_events))
         .route("/api/alerts/channels", get(handlers::alerts::list_channels).post(handlers::alerts::create_channel))
         .route("/api/alerts/channels/{id}", axum::routing::delete(handlers::alerts::delete_channel))
         .route("/api/alerts/channels/{id}/test", post(handlers::alerts::test_channel))

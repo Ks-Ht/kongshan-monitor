@@ -124,7 +124,15 @@ fn metric_value(name: &str, m: &Metrics, disk_total: i64, disk_used: i64) -> Opt
     match name {
         "cpu_pct" => Some(m.cpu_pct),
         "mem_pct" => Some(pct(m.mem_used as f64, m.mem_total as f64)),
-        "disk_pct" => Some(pct(disk_used as f64, disk_total as f64)),
+        // 遍历所有挂载点取最大使用率(与 inode_pct 一致):独立挂载的 /data、/var 写满
+        // 也能触发,不再只看主盘漏报。m.disks 为空时回退到入参的主盘。
+        "disk_pct" => m
+            .disks
+            .iter()
+            .filter(|d| d.total > 0)
+            .map(|d| pct(d.used as f64, d.total as f64))
+            .fold(None, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
+            .or_else(|| (disk_total > 0).then(|| pct(disk_used as f64, disk_total as f64))),
         "swap_pct" => Some(pct(m.swap_used as f64, m.swap_total as f64)),
         "load1" => Some(m.load1),
         "cpu_temp" => m.cpu_temp_c,
@@ -173,15 +181,24 @@ async fn load_rules(st: &AppState, node_id: i64, offline: bool) -> Vec<RuleLite>
 /// 取节点在 `at_or_before` 时刻(含)之前最近一条历史指标,重算出 `metric` 的值
 /// (roc 变化率专用:仅支持有独立列的核心指标,从 `metrics` 表直接重算)。
 #[allow(clippy::cast_precision_loss)]
-async fn past_core_value(st: &AppState, node_id: i64, metric: &str, at_or_before: i64) -> Option<f64> {
+async fn past_core_value(
+    st: &AppState,
+    node_id: i64,
+    metric: &str,
+    at_or_before: i64,
+    not_before: i64,
+) -> Option<f64> {
+    // 加时间下界:命中点须落在 [not_before, at_or_before] 内,否则视为历史不足返回 None。
+    // 否则节点离线数小时恢复后,会拿离线"前"那条陈旧点算变化率 → 假 critical。
     let row = sqlx::query!(
         r#"SELECT cpu_pct as "cpu_pct!: f64", load1 as "load1!: f64",
                   mem_used as "mem_used!: i64", mem_total as "mem_total!: i64",
                   swap_used as "swap_used!: i64", swap_total as "swap_total!: i64",
                   disk_used as "disk_used!: i64", disk_total as "disk_total!: i64"
-           FROM metrics WHERE node_id = ?1 AND ts <= ?2 ORDER BY ts DESC LIMIT 1"#,
+           FROM metrics WHERE node_id = ?1 AND ts <= ?2 AND ts >= ?3 ORDER BY ts DESC LIMIT 1"#,
         node_id,
-        at_or_before
+        at_or_before,
+        not_before
     )
     .fetch_optional(&st.db)
     .await
@@ -209,7 +226,10 @@ pub async fn on_metrics(st: &AppState, node_id: i64, m: &Metrics, disk_total: i6
         // 其余比较符仍按当前值判定。历史数据不足(节点刚上线等)时不判定,避免误报。
         let (breaching, report_val) = if rule.comparator == "roc" {
             let window = rule.roc_window_secs.max(30);
-            match past_core_value(st, node_id, &rule.metric, now.saturating_sub(window)).await {
+            // 过去点须落在 [now-2*window, now-window]:超出即历史不足,不判定(防跨离线误报)。
+            let at = now.saturating_sub(window);
+            let floor = now.saturating_sub(window.saturating_mul(2));
+            match past_core_value(st, node_id, &rule.metric, at, floor).await {
                 Some(past) => {
                     let delta = val - past;
                     (delta.abs() >= rule.threshold, delta)
@@ -353,8 +373,30 @@ async fn transition(
         match ins {
             Ok(r) => {
                 let eid = r.last_insert_rowid();
-                st.alert_rt.lock().entry(key).or_default().event_id = Some(eid);
-                push_and_notify(st, rule, node_id, val, true).await;
+                // 回填前复核:INSERT 的 await 期间,若并发的 not-breaching 转移已把本键置为
+                // 非 firing(彼时 event_id 还是 None 无从消解),此处立即把刚插入的事件标记
+                // resolved,避免在库里留下永不消解的幽灵 firing 事件。
+                let still_firing = {
+                    let mut map = st.alert_rt.lock();
+                    let b = map.entry(key).or_default();
+                    if b.firing && b.event_id.is_none() {
+                        b.event_id = Some(eid);
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if still_firing {
+                    push_and_notify(st, rule, node_id, val, true).await;
+                } else {
+                    let _ = sqlx::query!(
+                        "UPDATE alert_events SET state = 'resolved', resolved_at = ?1 WHERE id = ?2 AND resolved_at IS NULL",
+                        now,
+                        eid
+                    )
+                    .execute(&st.db)
+                    .await;
+                }
             }
             Err(e) => tracing::error!(error = %e, "告警事件写入失败"),
         }
@@ -380,10 +422,11 @@ fn format_message(rule: &RuleLite, val: f64, firing: bool) -> String {
         };
     }
     if rule.comparator == "roc" {
-        let mins = rule.roc_window_secs.max(30) / 60;
+        let w = rule.roc_window_secs.max(30);
+        let win = if w < 60 { format!("{w} 秒") } else { format!("{} 分钟", w / 60) };
         return if firing {
             format!(
-                "{label} 在 {mins} 分钟内变化 {val:+.1}(阈值 ±{:.1};规则:{})",
+                "{label} 在 {win} 内变化 {val:+.1}(阈值 ±{:.1};规则:{})",
                 rule.threshold, rule.name
             )
         } else {
@@ -653,10 +696,19 @@ mod tests {
         let s = m();
         assert!((metric_value("cpu_pct", &s, 0, 0).unwrap() - 95.0).abs() < 1e-9);
         assert!((metric_value("mem_pct", &s, 0, 0).unwrap() - 80.0).abs() < 1e-9);
+        // disks 为空时回退到入参主盘
         assert!((metric_value("disk_pct", &s, 200, 50).unwrap() - 25.0).abs() < 1e-9);
         assert!((metric_value("swap_pct", &s, 0, 0).unwrap() - 90.0).abs() < 1e-9);
-        // 除零安全
-        assert_eq!(metric_value("disk_pct", &s, 0, 0).unwrap(), 0.0);
+        // 无任何磁盘数据(disks 空且入参 total=0)→ 返回 None 不评估,优于旧的 Some(0.0)
+        // (后者会让"disk_pct < X"规则误报)。
+        assert!(metric_value("disk_pct", &s, 0, 0).is_none());
+        // 遍历所有挂载点取最大使用率:/ 20% 与 /data 95% → 取 95%(次盘满也能告警)
+        let mut sd = m();
+        sd.disks = vec![
+            outpost_common::DiskUsage { mount: "/".into(), fs: "ext4".into(), total: 100, used: 20, inodes_total: 0, inodes_used: 0 },
+            outpost_common::DiskUsage { mount: "/data".into(), fs: "ext4".into(), total: 100, used: 95, inodes_total: 0, inodes_used: 0 },
+        ];
+        assert!((metric_value("disk_pct", &sd, 100, 20).unwrap() - 95.0).abs() < 1e-9);
         assert!(metric_value("unknown", &s, 0, 0).is_none());
     }
 

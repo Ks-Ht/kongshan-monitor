@@ -162,7 +162,7 @@ pub async fn set(
 /// GET /api/audit — 最近 100 条审计记录。
 pub async fn audit_list(
     State(st): State<AppState>,
-    _user: SessionUser,
+    _user: SessionAdmin, // 审计日志含管理员用户名 + 各操作来源 IP,收紧为仅管理员可读
 ) -> Result<Json<Value>, AppError> {
     let rows = sqlx::query!(
         r#"SELECT ts as "ts!", username as "username!", ip as "ip!",
@@ -179,7 +179,7 @@ pub async fn audit_list(
 }
 
 /// GET /api/audit/export — 全量审计日志 CSV(公式注入安全)。
-pub async fn audit_export(State(st): State<AppState>, _u: SessionUser) -> Result<Response, AppError> {
+pub async fn audit_export(State(st): State<AppState>, _u: SessionAdmin) -> Result<Response, AppError> {
     let rows = sqlx::query!(
         r#"SELECT ts as "ts!", username as "username!", ip as "ip!",
                   action as "action!", detail as "detail!"

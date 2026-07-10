@@ -122,7 +122,42 @@ fn http_get(path: &str) -> Option<Vec<u8>> {
         return None;
     }
     let body_start = header_body_split(&buf)?;
-    Some(buf.get(body_start..)?.to_vec())
+    let body = buf.get(body_start..)?;
+    // dockerd(Go net/http)在响应超过内部嗅探缓冲(约 2KB,即容器数一多时)会改用
+    // chunked 传输编码;此时 body 里夹着十六进制块长与 CRLF,必须解码后才能解析 JSON,
+    // 否则解析静默失败,表现为规模相关的"0 容器"/容器指标为 0。
+    if header_has_chunked(buf.get(..body_start).unwrap_or(&[])) {
+        return decode_chunked(body);
+    }
+    Some(body.to_vec())
+}
+
+/// header 区是否声明了 `Transfer-Encoding: chunked`(大小写不敏感)。
+fn header_has_chunked(headers: &[u8]) -> bool {
+    let l = headers.to_ascii_lowercase();
+    l.windows(17).any(|w| w == b"transfer-encoding") && l.windows(7).any(|w| w == b"chunked")
+}
+
+/// 解码 chunked body:反复 `<hex 块长>[;扩展]\r\n<数据>\r\n`,遇 0 块结束。任一步异常返回 None。
+fn decode_chunked(body: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(body.len());
+    let mut pos = 0usize;
+    loop {
+        let rest = body.get(pos..)?;
+        let crlf = rest.windows(2).position(|w| w == b"\r\n")?;
+        let hex = std::str::from_utf8(rest.get(..crlf)?).ok()?;
+        let len = usize::from_str_radix(hex.split(';').next()?.trim(), 16).ok()?;
+        pos = pos.checked_add(crlf)?.checked_add(2)?;
+        if len == 0 {
+            break;
+        }
+        out.extend_from_slice(body.get(pos..pos.checked_add(len)?)?);
+        pos = pos.checked_add(len)?.checked_add(2)?;
+        if out.len() > MAX_RESPONSE_BYTES {
+            return None;
+        }
+    }
+    Some(out)
 }
 
 /// 容器 ID 形态校验(防御性:即便来自 Docker 自身响应而非用户输入,拼 URL 前仍校验)。

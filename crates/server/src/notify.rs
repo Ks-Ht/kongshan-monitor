@@ -58,6 +58,12 @@ fn ipv6_global(ip: Ipv6Addr) -> bool {
     if s[0] == 0x2001 && s[1] == 0x0db8 {
         return false;
     }
+    // NAT64(64:ff9b::/96 及本地 64:ff9b:1::/48):末 32 位内嵌 v4,按 v4 规则判定,
+    // 防经 NAT64 网关把 webhook/SMTP 请求打进内网。
+    if s[0] == 0x0064 && s[1] == 0xff9b {
+        let v4 = Ipv4Addr::from((u32::from(s[6]) << 16) | u32::from(s[7]));
+        return ipv4_global(v4);
+    }
     // IPv4-mapped / -compatible:按其内嵌 v4 规则判断(通常应拒绝)
     if let Some(v4) = ip.to_ipv4_mapped() {
         return ipv4_global(v4);
