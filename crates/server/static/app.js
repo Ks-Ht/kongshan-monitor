@@ -119,24 +119,22 @@ function notifyDesktop(text) {
 }
 
 /* ---------- 主题(浅/深 + 配色) ---------- */
+const DEFAULT_THEME = "aura";
 const THEMES = [
-  { id: "apple", name: "默认", color: "#0071e3" },
-  { id: "green", name: "森林绿", color: "#3e8e7e" },
+  { id: "aura", name: "默认-流光", color: "#7c6cf0" },
+  { id: "apple", name: "苹果", color: "#0071e3" },
   { id: "tech", name: "科技", color: "#35c5e0" },
   { id: "minimal", name: "极简", color: "#3a3a38" },
-  { id: "soft", name: "柔和", color: "#e08a5c" },
   { id: "terminal", name: "终端", color: "#3ddc7a" },
-  { id: "panel", name: "面板", color: "#6c5ce7" },
-  { id: "ink-light", name: "水墨浅色", color: "#3f6b57" },
-  { id: "ops-dark", name: "运维深色", color: "#46c08d" },
-  { id: "astro", name: "观星", color: "#d4a94e" },
-  { id: "aura", name: "流光", color: "#7c6cf0" },
 ];
 function applyAccent(id) {
-  document.documentElement.setAttribute("data-theme", id || "apple");
+  document.documentElement.setAttribute("data-theme", id || DEFAULT_THEME);
 }
 function currentAccent() {
-  return localStorage.getItem("op-accent") || "apple";
+  // 空值或已下架的旧主题(森林绿/柔和/面板/水墨/运维/观星等)一律回落到默认(默认-流光),
+  // 避免此前选过被删主题的用户残留在无效主题上。
+  const saved = localStorage.getItem("op-accent");
+  return THEMES.some((t) => t.id === saved) ? saved : DEFAULT_THEME;
 }
 function setAccent(id) {
   localStorage.setItem("op-accent", id);
